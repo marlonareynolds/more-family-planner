@@ -13,11 +13,12 @@ type GuidanceMap = Record<string, { guidance: "allow" | "avoid" | "simplify"; so
  * Suggestions from the starter catalogue. Hard constraints filter; the
  * viewer's own private guidance hides or simplifies; no-match is honest.
  */
-export function Ideas({ kind, guidance }: { kind: Activity["kind"]; guidance: GuidanceMap }) {
+export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity["kind"]; guidance: GuidanceMap; lighterWeek?: boolean }) {
   const app = useApp();
   const [maxCost, setMaxCost] = useState<string>("any");
   const [setting, setSetting] = useState<Setting | "any">("any");
-  const [lowEffort, setLowEffort] = useState(false);
+  // A heavy week (from your own private check-in) starts with low-effort ideas.
+  const [lowEffort, setLowEffort] = useState(lighterWeek);
   const [showHidden, setShowHidden] = useState(false);
   const [planning, setPlanning] = useState<Activity | null>(null);
   const bands = [...new Set(app.children.map((c) => c.ageBand as AgeBand))];

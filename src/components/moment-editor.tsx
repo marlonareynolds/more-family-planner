@@ -19,6 +19,8 @@ export interface MomentTemplate {
   budgetMinor?: number | null;
   durationMinutes?: number;
   location?: string;
+  /** A suggested free time to start from. */
+  slot?: { date: string; startTime: string; endTime: string; endDate: string };
 }
 
 const KIND_TITLE: Record<MomentKind, string> = { me: "Time for me", us: "Time for us", family: "Family time" };
@@ -54,7 +56,7 @@ export function MomentEditor({
   const [title, setTitle] = useState(moment?.title ?? template?.title ?? "");
   const [notes, setNotes] = useState(moment?.notes ?? template?.notes ?? "");
   const [location, setLocation] = useState(moment?.location ?? template?.location ?? "");
-  const [span, setSpan] = useState<SpanValue>(moment ? spanFrom(moment.start, moment.end, app.timeZone) : defaultSpan(defaultDate, startTime, endFromTemplate()));
+  const [span, setSpan] = useState<SpanValue>(moment ? spanFrom(moment.start, moment.end, app.timeZone) : (template?.slot ? { ...defaultSpan(template.slot.date, template.slot.startTime, template.slot.endTime), endDate: template.slot.endDate } : defaultSpan(defaultDate, startTime, endFromTemplate())));
   const [people, setPeople] = useState({
     adultIds: moment?.participantIds ?? (kind === "me" ? [app.me.id] : app.adults.map((a) => a.id)),
     childIds: moment?.childIds ?? (kind === "family" ? app.children.map((c) => c.id) : []),

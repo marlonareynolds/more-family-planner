@@ -6,6 +6,7 @@ import { useApp, useNow } from "./app-context";
 import { todayIn } from "./format";
 import { MomentCard } from "./moment-card";
 import { MomentEditor, type MomentKind } from "./moment-editor";
+import { FindATime } from "./find-a-time";
 import { Button, EmptyState, SectionTitle } from "./ui";
 
 /** Moments of one kind, split by what each adult needs to do next. */
@@ -32,6 +33,7 @@ export function MomentList({ data, kind, title, intro }: { data: WeekView; kind:
         </div>
         <Button variant="primary" onClick={() => setCreating(true)}>+ Plan something</Button>
       </div>
+      <FindATime kind={kind} />
       {waiting.length > 0 && (<><SectionTitle>Waiting for your answer</SectionTitle><ul className="flex flex-col gap-3">{waiting.map(card)}</ul></>)}
       <SectionTitle>Coming up</SectionTitle>
       {upcoming.length ? <ul className="flex flex-col gap-3">{upcoming.map(card)}</ul> : <EmptyState title="Nothing planned yet.">Pick an idea below or plan your own.</EmptyState>}

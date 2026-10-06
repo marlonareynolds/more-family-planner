@@ -5,6 +5,7 @@ import { getDb } from "@/db/client";
 import { currentWeekKey, isWeekKey, instantToLocalDate } from "@/domain/time";
 import { track } from "./analytics";
 import { syncDue } from "./calendar-sync";
+import { processOutbox } from "./outbox";
 import { currentActor } from "./auth";
 import { getProjection, getWeek, householdFor } from "./queries/week";
 
@@ -20,6 +21,10 @@ export async function requireHousehold() {
   await track(db, { type: "active_day", accountId: actor.accountId, householdId: household.id, dedupeKey: `active:${actor.accountId}:${day}` }).catch(() => {});
   // Refresh this adult's own calendar links in the background when they're over 3 hours old.
   after(() => syncDue(db, 3 * 3_600_000, { accountId: actor.accountId, limit: 5 }).catch(() => {}));
+  // Deliver reminders that have come due since the last change or cron run, so
+  // a day-before reminder shows when someone opens More, not at the next cron.
+  // Cheap when nothing is due: one indexed read of pending jobs.
+  await processOutbox(db, new Date(), 10).catch(() => {});
   return { actor, db, household };
 }
 
