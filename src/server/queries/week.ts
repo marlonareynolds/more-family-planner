@@ -22,7 +22,7 @@ import { coverageFor, groupCoverage, type CareArrangement, type CoverageState } 
 import { DomainError } from "@/domain/errors";
 import type { Interval } from "@/domain/intervals";
 import { summarise, type ExpenseSummary } from "@/domain/money";
-import { isAgreed, latestDecision, readiness, stageLabel, type Decision, type ReadinessGap } from "@/domain/moments";
+import { hiddenReason, isAgreed, latestDecision, readiness, stageLabel, type Decision, type ReadinessGap } from "@/domain/moments";
 import { addDays, instantToLocalDate, isWeekKey, startOfLocalDate, weekKeyFor } from "@/domain/time";
 import type { Actor } from "../auth";
 import { loadBusy, loadEventOccurrences } from "./busy";
@@ -83,6 +83,8 @@ export interface MomentView {
   budgetMinor: number | null;
   surprise: boolean;
   surpriseHidden: boolean;
+  /** Title, notes, place and tasks withheld from this viewer (surprise or someone else's me-time). */
+  detailsHidden: boolean;
   lifecycle: "draft" | "planned" | "completed" | "cancelled";
   sharing: "private" | "shared";
   materialVersion: number;
@@ -169,6 +171,11 @@ export interface WeekView {
   attention: AttentionItem[];
   notifications: { id: string; text: string; createdAt: string; read: boolean; sourceType: string | null; sourceId: string | null }[];
   checkinDone: boolean;
+}
+
+function hiddenLabel(m: MomentView | undefined): string | null {
+  if (!m?.detailsHidden) return null;
+  return m.surpriseHidden ? "Surprise plan" : "Time for themselves";
 }
 
 export async function householdFor(db: Db, actor: Actor) {
@@ -318,6 +325,8 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
 
   const momentsOut: MomentView[] = [];
   for (const m of momentRows) {
+    const hidden = hiddenReason(m, viewer);
+    const organiserName = adults.find((a) => a.id === m.organiserId)?.displayName ?? "Your partner";
     const acc = accRows.filter((a) => a.momentId === m.id).map((a) => ({ actorId: a.actorId, materialVersion: a.materialVersion, decision: a.decision }));
     const agreed = m.sharing === "shared" && isAgreed(m.participantIds, adultIds, m.materialVersion, acc);
     const decisions: Record<string, Decision | null> = {};
@@ -333,7 +342,7 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
         .filter((k) => !m.childIds.includes(k.id))
         .map((k) => {
           const req = { id: `moment:${m.id}:${k.id}`, childId: k.id, start: occupiedStart, end: occupiedEnd };
-          if (m.lifecycle !== "completed") requirements.push({ ...req, reason: m.surprise && m.organiserId !== viewer ? "Plan together" : m.title });
+          if (m.lifecycle !== "completed") requirements.push({ ...req, reason: hidden === "me_time" ? `${organiserName} has time to themselves` : hidden ? "Plan together" : m.title });
           return coverageFor(req, arrangements, parentBusy).state;
         });
       careState = states.every((s) => s === "covered") ? "covered" : states.some((s) => s !== "unresolved") ? "partly_covered" : "unresolved";
@@ -355,15 +364,15 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
       openTasks: tasks.filter((t) => t.state === "open").length,
       conflicts: conflicts.length,
     });
-    const surpriseHidden = m.surprise && m.organiserId !== viewer && m.lifecycle !== "completed";
+    const surpriseHidden = hidden === "surprise";
     momentsOut.push({
       kind: "moment",
       id: m.id,
       momentKind: m.kind,
-      title: surpriseHidden ? `A surprise from ${adults.find((a) => a.id === m.organiserId)?.displayName ?? "your partner"}` : m.title,
-      notes: surpriseHidden ? "" : m.notes,
-      location: surpriseHidden ? "" : m.location,
-      activityKey: surpriseHidden ? null : m.activityKey,
+      title: hidden === "me_time" ? `${organiserName}: time for themselves` : hidden ? `A surprise from ${organiserName}` : m.title,
+      notes: hidden ? "" : m.notes,
+      location: hidden ? "" : m.location,
+      activityKey: hidden ? null : m.activityKey,
       start: m.startAt.getTime(),
       end: m.endAt.getTime(),
       travelBeforeMinutes: m.travelBeforeMinutes,
@@ -375,6 +384,7 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
       budgetMinor: m.budgetMinor,
       surprise: m.surprise,
       surpriseHidden,
+      detailsHidden: hidden !== null,
       lifecycle: m.lifecycle,
       sharing: m.sharing,
       materialVersion: m.materialVersion,
@@ -389,7 +399,7 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
       stage: stageLabel({ lifecycle: m.lifecycle, sharing: m.sharing, agreed, ready: ready.ready }),
       careState,
       conflicts,
-      tasks: tasks.map((t) => ({ id: t.id, title: t.title, ownerId: t.ownerId, state: t.state, version: t.version })),
+      tasks: hidden ? [] : tasks.map((t) => ({ id: t.id, title: t.title, ownerId: t.ownerId, state: t.state, version: t.version })),
       myFeedbackSaved: feedbackSet.has(m.id),
       expenseId: null,
     });
@@ -436,7 +446,7 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     .filter((e) => !(e.sourceId && hiddenDraftIds.has(e.sourceId)))
     .map((e) => ({
       id: e.id,
-      label: e.sourceType === "moment" && momentsOut.find((m) => m.id === e.sourceId)?.surpriseHidden ? "Surprise plan" : e.label,
+      label: hiddenLabel(e.sourceType === "moment" ? momentsOut.find((m) => m.id === e.sourceId) : undefined) ?? e.label,
       sourceType: e.sourceType,
       sourceId: e.sourceId,
       activityDate: e.activityDate,

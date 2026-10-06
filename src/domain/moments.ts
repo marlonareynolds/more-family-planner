@@ -115,3 +115,21 @@ export function stageLabel(m: { lifecycle: Lifecycle; sharing: Sharing; agreed: 
   if (!m.ready) return "Agreed";
   return "Arrangements ready";
 }
+
+/**
+ * What a partner sees of another adult's shared me-time. "busy" shows only
+ * that the time is taken; "details" would show its title and notes too.
+ * Undecided product question: "busy" is the safe default.
+ */
+export const ME_TIME_PARTNER_VIEW: "busy" | "details" = "busy";
+
+/** Why some of a moment's details are withheld from this viewer, if they are. */
+export function hiddenReason(
+  m: { kind: MomentKind; organiserId: string; surprise: boolean; lifecycle: Lifecycle },
+  viewerId: string,
+): "surprise" | "me_time" | null {
+  if (m.organiserId === viewerId) return null;
+  if (m.kind === "me" && ME_TIME_PARTNER_VIEW === "busy") return "me_time";
+  if (m.surprise && m.lifecycle !== "completed") return "surprise";
+  return null;
+}

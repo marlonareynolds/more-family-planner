@@ -146,10 +146,10 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
               {m.momentKind === "me" ? "Protect this time" : "Invite"}
             </Button>
           )}
-          {(m.lifecycle === "draft" || m.lifecycle === "planned") && !m.surpriseHidden && <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>}
+          {(m.lifecycle === "draft" || m.lifecycle === "planned") && !m.detailsHidden && <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>}
           {m.lifecycle === "planned" && past && <Button size="sm" variant="primary" onClick={() => run("CompleteMoment", { momentId: m.id, version: m.version })}>It happened</Button>}
           {m.lifecycle === "completed" && !m.myFeedbackSaved && <Button size="sm" variant="primary" onClick={() => setReflecting(true)}>Reflect privately</Button>}
-          {m.lifecycle !== "cancelled" && !m.surpriseHidden && <Button size="sm" variant="ghost" onClick={() => setCostOpen(true)}>{expense ? "Costs" : "Add cost"}</Button>}
+          {m.lifecycle !== "cancelled" && !m.detailsHidden && <Button size="sm" variant="ghost" onClick={() => setCostOpen(true)}>{expense ? "Costs" : "Add cost"}</Button>}
           {m.lifecycle === "draft" && m.organiserId === app.me.id && (
             <Button size="sm" variant="ghost" onClick={() => run("DeleteDraft", { momentId: m.id, version: m.version })}>Delete draft</Button>
           )}

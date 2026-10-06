@@ -109,11 +109,17 @@ export async function release(tx: Tx, sourceType: "moment" | "care", sourceId: s
 }
 
 /** Supersede pending deliveries about a source so stale reminders never fire (AT-21). */
-export async function supersedeDeliveries(tx: Tx, sourceId: string): Promise<void> {
+export async function supersedeDeliveries(tx: Tx, sourceId: string, kind?: string): Promise<void> {
   await tx
     .update(outbox)
     .set({ state: "superseded", processedAt: new Date() })
-    .where(and(eq(outbox.state, "pending"), sql`${outbox.payload}->>'sourceId' = ${sourceId}`));
+    .where(
+      and(
+        eq(outbox.state, "pending"),
+        sql`${outbox.payload}->>'sourceId' = ${sourceId}`,
+        kind ? sql`${outbox.payload}->>'kind' = ${kind}` : undefined,
+      ),
+    );
 }
 
 /**

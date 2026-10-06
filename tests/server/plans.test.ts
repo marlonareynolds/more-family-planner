@@ -89,6 +89,42 @@ describe("dates, privacy and money", () => {
     expect((await w.week(w.sam, WEEK, late)).notifications).toHaveLength(notes.length);
   });
 
+  it("a yes changed to a no stops the day-before reminder", async () => {
+    const w = await newWorld();
+    const m = await w.run(w.alex, "CreateMoment", { kind: "us", title: "Dinner", span: timed("2030-10-11", "19:00", "21:00"), participantIds: [w.alex.accountId, w.sam.accountId] });
+    await w.run(w.alex, "ShareMoment", { momentId: m.momentId, version: m.version });
+    await w.run(w.sam, "RespondToMoment", { momentId: m.momentId, materialVersion: 1, decision: "accepted" });
+    await w.run(w.sam, "RespondToMoment", { momentId: m.momentId, materialVersion: 1, decision: "declined" });
+    const late = new Date(Date.UTC(2030, 9, 11, 0, 0));
+    await processOutbox(w.db, late);
+    for (const who of [w.alex, w.sam]) {
+      const notes = (await w.week(who, WEEK, late)).notifications.map((n) => n.text);
+      expect(notes.some((t) => t.includes("tomorrow"))).toBe(false);
+    }
+    expect((await w.week(w.alex, WEEK, late)).notifications.map((n) => n.text)).toContain("Sam can't make your plan.");
+  });
+
+  it("a partner sees shared me-time as busy, without its title, notes or tasks", async () => {
+    const w = await newWorld();
+    const m = await w.run(w.alex, "CreateMoment", { kind: "me", title: "Therapy session", notes: "Room 4, bring notebook", span: timed("2030-10-09", "18:00", "19:00"), participantIds: [w.alex.accountId] });
+    await w.run(w.alex, "AddTask", { momentId: m.momentId, title: "Pay the therapist", ownerId: w.alex.accountId });
+    const draft = (await w.week(w.alex, WEEK)).moments[0];
+    await w.run(w.alex, "ShareMoment", { momentId: m.momentId, version: draft.version });
+
+    const mine = (await w.week(w.alex, WEEK)).moments[0];
+    expect(mine.title).toBe("Therapy session");
+    expect(mine.detailsHidden).toBe(false);
+
+    const week = await w.week(w.sam, WEEK);
+    const theirs = week.moments[0];
+    expect(theirs.detailsHidden).toBe(true);
+    expect(theirs.title).not.toContain("Therapy");
+    expect(theirs.notes).toBe("");
+    expect(theirs.tasks).toEqual([]);
+    expect(JSON.stringify(week)).not.toContain("Therapy");
+    expect(JSON.stringify(week)).not.toContain("therapist");
+  });
+
   it("8.9 and AT-22/23: £80 for four children, £30 refund, replayed payment", async () => {
     const w = await newWorld();
     for (const n of ["A", "B", "C", "D"]) await w.run(w.alex, "AddChild", { preferredName: n, ageBand: "5-7" });

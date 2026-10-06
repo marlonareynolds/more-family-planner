@@ -1,6 +1,7 @@
 import { and, eq, isNull, lte, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { careArrangements, memberships, moments, notifications, outbox, preparationTasks } from "@/db/schema";
+import { acceptances, careArrangements, memberships, moments, notifications, outbox, preparationTasks } from "@/db/schema";
+import { isAgreed } from "@/domain/moments";
 
 /**
  * Drains the transactional outbox (spec 10.1, 13.2). Processing is
@@ -32,7 +33,22 @@ async function stillRelevant(db: Db, p: NotifyPayload): Promise<boolean> {
     if (!m || m.sharing !== "shared" || !m.participantIds.includes(p.recipientId)) return false;
     if (p.kind === "moment.cancelled") return m.lifecycle === "cancelled";
     if (m.lifecycle !== "planned") return false;
-    return m.materialVersion === p.sourceVersion;
+    if (m.materialVersion !== p.sourceVersion) return false;
+    // A reminder is only true while everyone still agrees to this version.
+    if (p.kind === "moment.reminder") {
+      const adults = await db
+        .select({ id: memberships.accountId })
+        .from(memberships)
+        .where(and(eq(memberships.householdId, p.householdId), isNull(memberships.endsAt)));
+      const acc = await db.select().from(acceptances).where(eq(acceptances.momentId, m.id)).orderBy(acceptances.createdAt);
+      return isAgreed(
+        m.participantIds,
+        adults.map((a) => a.id),
+        m.materialVersion,
+        acc.map((a) => ({ actorId: a.actorId, materialVersion: a.materialVersion, decision: a.decision })),
+      );
+    }
+    return true;
   }
   if (p.sourceType === "care") {
     const [c] = await db.select().from(careArrangements).where(eq(careArrangements.id, p.sourceId));

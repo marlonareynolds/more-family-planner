@@ -323,7 +323,10 @@ export const respondToMoment = defineCommand({
     if (p.decision === "accepted") {
       reserved = await settleAgreement(ctx, m);
     } else {
+      // Changing a yes to a no undoes the agreement: free the time and stop
+      // the day-before reminders that the earlier yes queued.
       await release(ctx.tx, "moment", m.id);
+      await supersedeDeliveries(ctx.tx, m.id, "moment.reminder");
     }
     await ctx.tx.update(moments).set({ version: sql`${moments.version} + 1` }).where(eq(moments.id, m.id));
     for (const other of m.participantIds.filter((id) => id !== ctx.actor.accountId)) await queueNotification(ctx, {

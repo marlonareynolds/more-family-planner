@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import type { Db } from "@/db/client";
+import { hiddenReason } from "@/domain/moments";
 import {
   accounts,
   careArrangements,
@@ -80,7 +81,7 @@ export async function exportHousehold(db: Db, actor: Actor) {
     })),
     moments: ms.map((m) => ({
       kind: m.kind,
-      title: m.surprise && m.organiserId !== viewer && m.lifecycle !== "completed" ? "Surprise" : m.title,
+      title: hiddenReason(m, viewer) === "me_time" ? "Time for themselves" : hiddenReason(m, viewer) ? "Surprise" : m.title,
       start: m.startAt,
       end: m.endAt,
       lifecycle: m.lifecycle,
