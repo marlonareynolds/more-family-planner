@@ -111,3 +111,23 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   await go(sam, "/week");
   await sam.screenshot({ path: `test-results/week-${info.project.name}.png`, fullPage: true });
 });
+
+test("an adult answers the weekly trial questions", async ({ browser }, info) => {
+  const tag = `${info.project.name}-t${Date.now().toString(36)}`;
+  const vp = info.project.name === "phone" ? { width: 412, height: 915 } : undefined;
+  const alex = await adult(browser, `Alex ${tag}`, vp);
+  await alex.getByLabel("Household name").fill(`Household ${tag}`);
+  await alex.getByRole("button", { name: "Start our household" }).click();
+  await alex.waitForURL(/\/today/);
+
+  await go(alex, "/trial");
+  await axe(alex);
+  await alex.getByLabel("As a couple").fill("2");
+  await alex.getByLabel("Outside More").fill("45");
+  await alex.getByRole("radio", { name: "Yes" }).click();
+  await alex.getByRole("button", { name: "Save answers" }).click();
+  await expect(alex.getByRole("status")).toHaveText("Saved");
+  await go(alex, "/trial");
+  await expect(alex.getByText("You: 1 week")).toBeVisible();
+  await expect(alex.getByText(/Moments: – \/ 2 \/ –/)).toBeVisible();
+});

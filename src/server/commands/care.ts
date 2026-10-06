@@ -280,6 +280,7 @@ export const arrangeCare = defineCommand({
     }
     await ctx.bumpSchedule();
     await ctx.audit("care.arrange", "care", a.id);
+    if (a.state === "confirmed") await ctx.track("care_gap_resolved", p.kind);
     return { arrangementId: a.id, state: a.state };
   },
 });
@@ -321,6 +322,7 @@ export const respondToCare = defineCommand({
     }
     await ctx.bumpSchedule();
     await ctx.audit(`care.${p.decision}`, "care", a.id);
+    if (p.decision === "confirm") await ctx.track("care_gap_resolved", a.kind);
     return { arrangementId: a.id };
   },
 });

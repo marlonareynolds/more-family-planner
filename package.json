@@ -14,7 +14,8 @@
     "db:migrate": "tsx scripts/migrate.mts",
     "db:backup": "tsx scripts/backup.mts",
     "db:rehearse": "tsx scripts/restore-rehearsal.mts",
-    "db:restore": "tsx scripts/restore.mts"
+    "db:restore": "tsx scripts/restore.mts",
+    "trial:report": "tsx scripts/trial-report.mts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

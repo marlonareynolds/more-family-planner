@@ -5,6 +5,7 @@ import { getDb, type Tx } from "@/db/client";
 import { auditEvents, households, idempotencyKeys, memberships, outbox } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import type { Actor } from "./auth";
+import { track, type ProductEventType } from "./analytics";
 
 /**
  * The command pipeline (spec 10.3, 12.2). Every state change goes through
@@ -46,6 +47,8 @@ export interface CommandContext {
   bumpMembership(): Promise<number>;
   emit(eventType: string, dedupeKey: string, payload: Record<string, unknown>, availableAt?: Date): Promise<void>;
   audit(action: string, resourceType: string | null, resourceId: string | null): Promise<void>;
+  /** Record a product event (spec 21.1) with an optional reason code. */
+  track(type: ProductEventType, reason?: string | null, householdId?: string): Promise<void>;
 }
 
 export type AccountContext = Omit<CommandContext, "household" | "bumpSchedule" | "bumpMembership">;
@@ -162,6 +165,9 @@ export async function executeCommand(actor: Actor, raw: unknown): Promise<Comman
         });
       };
 
+      const trackFn: CommandContext["track"] = (type, reason, householdId) =>
+        track(tx, { type, accountId: actor.accountId, householdId: householdId ?? envelope.householdId ?? null, reason });
+
       let result: unknown;
       let revisions: CommandResult["revisions"];
 
@@ -202,6 +208,7 @@ export async function executeCommand(actor: Actor, raw: unknown): Promise<Comman
           now,
           emit,
           audit,
+          track: trackFn,
           async bumpSchedule() {
             const [row] = await tx
               .update(households)
@@ -224,7 +231,7 @@ export async function executeCommand(actor: Actor, raw: unknown): Promise<Comman
         result = await def.handler(ctx, payload);
         revisions = { membershipRevision: current.membershipRevision, scheduleRevision: current.scheduleRevision };
       } else {
-        result = await def.handler({ tx, actor, envelope, now, emit, audit }, payload);
+        result = await def.handler({ tx, actor, envelope, now, emit, audit, track: trackFn }, payload);
       }
 
       const response: CommandResult = { ok: true, command: def.name, result, revisions };
@@ -238,9 +245,16 @@ export async function executeCommand(actor: Actor, raw: unknown): Promise<Comman
       return response;
     });
   } catch (err) {
-    throw translateDbError(err);
+    const translated = translateDbError(err);
+    if (translated instanceof DomainError && SAVE_CONFLICTS.has(translated.code)) {
+      // Count lost races so the trial can see friction; never block the reply on it.
+      await track(db, { type: "save_conflict", accountId: actor.accountId, householdId: envelope.householdId ?? null, reason: `${def.name}:${translated.code}` }).catch(() => {});
+    }
+    throw translated;
   }
 }
+
+const SAVE_CONFLICTS = new Set(["STALE_VERSION", "CONFLICT", "MEMBERSHIP_CHANGED"]);
 
 /** Compare-and-set on a versioned row (INV-08): zero rows updated is an error. */
 export function assertVersion(row: { version: number } | undefined, expected: number | undefined, what = "This item"): void {

@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { WeekView } from "@/server/queries/week";
 import { useApp } from "./app-context";
 import { fmtDateTime } from "./format";
-import { Badge, Button, Card, Dialog, ErrorNote, Field, SectionTitle, inputClass } from "./ui";
+import { Badge, Button, Card, Checkbox, Dialog, ErrorNote, Field, SectionTitle, inputClass } from "./ui";
 import { useCommand } from "./use-command";
 
 type Child = WeekView["children"][number];
@@ -35,11 +35,13 @@ export function SettingsPanel({
   openInvite,
   kids,
   profile,
+  analyticsOptOut,
 }: {
   household: WeekView["household"];
   openInvite: WeekView["openInvite"];
   kids: Child[];
   profile: { displayName: string; timeZone: string };
+  analyticsOptOut: boolean;
 }) {
   return (
     <div className="max-w-2xl">
@@ -48,7 +50,7 @@ export function SettingsPanel({
       <HouseholdDetails household={household} />
       <Adults openInvite={openInvite} />
       <Children kids={kids} />
-      <YourData />
+      <YourData analyticsOptOut={analyticsOptOut} />
       <Leaving household={household} />
     </div>
   );
@@ -252,7 +254,10 @@ function ChildEditor({ child, onClose }: { child: Child | null; onClose: () => v
   );
 }
 
-function YourData() {
+function YourData({ analyticsOptOut }: { analyticsOptOut: boolean }) {
+  const app = useApp();
+  const { run, error } = useCommand(app.householdId);
+  const [optOut, setOptOut] = useState(analyticsOptOut);
   return (
     <section>
       <SectionTitle>Your data</SectionTitle>
@@ -262,6 +267,16 @@ function YourData() {
           <a className="inline-flex min-h-11 items-center rounded-full border border-line px-4 text-[15px] hover:bg-surface-2" href="/api/v1/exports?kind=account" download>Download my private data</a>
           <a className="inline-flex min-h-11 items-center rounded-full border border-line px-4 text-[15px] hover:bg-surface-2" href="/api/v1/exports?kind=household" download>Download household data</a>
         </div>
+        <Checkbox
+          checked={!optOut}
+          onChange={async (on) => {
+            setOptOut(!on);
+            if (!(await run("SetAnalyticsOptOut", { optOut: !on }))) setOptOut(optOut);
+          }}
+          label="Count what I do for the household trial"
+          hint="Counts like 'a plan was agreed', with no titles, notes, places or names. Untick to stop recording anything for you."
+        />
+        <ErrorNote message={error?.message} />
       </Card>
     </section>
   );

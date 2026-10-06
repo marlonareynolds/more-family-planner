@@ -45,6 +45,7 @@ export const createHousehold = defineCommand({
     const [h] = await ctx.tx.insert(households).values({ name: p.name, timeZone: p.timeZone }).returning();
     await ctx.tx.insert(memberships).values({ householdId: h.id, accountId: ctx.actor.accountId });
     await ctx.tx.insert(auditEvents).values({ householdId: h.id, actorId: ctx.actor.accountId, action: "household.create", resourceType: "household", resourceId: h.id, result: "ok" });
+    await ctx.track("household_created", null, h.id);
     return { householdId: h.id };
   },
 });
@@ -138,6 +139,7 @@ export const joinHousehold = defineCommand({
       .where(eq(households.id, h.id));
     // A new partner never inherits old consent (AT-03): acceptance rows are
     // per person and per version, so nothing is carried over.
+    await ctx.track("partner_joined", null, h.id);
     return { householdId: h.id };
   },
 });

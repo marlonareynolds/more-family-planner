@@ -2,6 +2,7 @@ import "server-only";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { currentWeekKey, isWeekKey, instantToLocalDate } from "@/domain/time";
+import { track } from "./analytics";
 import { currentActor } from "./auth";
 import { getProjection, getWeek, householdFor } from "./queries/week";
 
@@ -12,6 +13,9 @@ export async function requireHousehold() {
   const db = await getDb();
   const household = await householdFor(db, actor);
   if (!household) redirect("/setup");
+  // One "active day" per adult per local day, for the trial's engagement count.
+  const day = instantToLocalDate(Date.now(), household.timeZone);
+  await track(db, { type: "active_day", accountId: actor.accountId, householdId: household.id, dedupeKey: `active:${actor.accountId}:${day}` }).catch(() => {});
   return { actor, db, household };
 }
 

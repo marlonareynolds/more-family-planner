@@ -22,6 +22,13 @@
       "when": 1791306809246,
       "tag": "0002_lock_data_api",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791326936865,
+      "tag": "0003_trial_evidence",
+      "breakpoints": true
     }
   ]
 }

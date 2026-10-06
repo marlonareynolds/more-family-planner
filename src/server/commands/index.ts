@@ -5,5 +5,6 @@ import "./moments";
 import "./care";
 import "./money";
 import "./private";
+import "./trial";
 
 export { executeCommand, commandNames } from "../pipeline";

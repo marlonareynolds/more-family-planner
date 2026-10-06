@@ -37,6 +37,8 @@ export const accounts = pgTable("accounts", {
   timeZone: text("time_zone").notNull().default("Europe/London"),
   createdAt: created(),
   closedAt: ts("closed_at"),
+  /** Product analytics opt-out (spec 21.1). Operational audit is unaffected. */
+  analyticsOptOut: boolean("analytics_opt_out").notNull().default(false),
   version: version(),
 });
 
@@ -499,3 +501,59 @@ export const usageReservations = pgTable("usage_reservations", {
   state: text("state", { enum: ["reserved", "settled", "released"] }).notNull().default("reserved"),
   createdAt: created(),
 });
+
+// ── Trial evidence (spec section 21) ───────────────────────────────────────
+
+/**
+ * Privacy-aware product events: pseudonymous ids, a type and a reason code.
+ * Never private text, titles, places or children's names. No foreign keys:
+ * analytics is separate from the operational record and outlives nothing
+ * it refers to by content.
+ */
+export const productEvents = pgTable(
+  "product_events",
+  {
+    id: id(),
+    eventType: text("event_type").notNull(),
+    accountId: uuid("account_id"),
+    householdId: uuid("household_id"),
+    /** A short non-sensitive code, e.g. the moment kind or the failing command. */
+    reason: text("reason"),
+    appVersion: text("app_version").notNull(),
+    occurredAt: ts("occurred_at").notNull().defaultNow(),
+    /** Set for once-only events such as one active day per adult. */
+    dedupeKey: text("dedupe_key").unique(),
+  },
+  (t) => [index("product_events_type_time").on(t.eventType, t.occurredAt), index("product_events_household").on(t.householdId, t.occurredAt)],
+);
+
+/**
+ * The household trial's weekly questions (spec 21.2), answered independently
+ * by each adult. Owned by the account like a check-in; a partner sees them
+ * only if the author chose to share them with the trial.
+ */
+export const trialResponses = pgTable(
+  "trial_responses",
+  {
+    id: id(),
+    accountId: uuid("account_id").notNull().references(() => accounts.id),
+    weekKey: date("week_key").notNull(),
+    baseline: boolean("baseline").notNull().default(false),
+    meMoments: smallint("me_moments"),
+    usMoments: smallint("us_moments"),
+    familyMoments: smallint("family_moments"),
+    /** Minutes spent organising, inside More and outside it. */
+    minutesInApp: smallint("minutes_in_app"),
+    minutesOutside: smallint("minutes_outside"),
+    /** 1 (not at all) to 5 (completely). */
+    fairlyAgreed: smallint("fairly_agreed"),
+    continueChoice: text("continue_choice", { enum: ["yes", "unsure", "no"] }),
+    helped: text("helped").notNull().default(""),
+    friction: text("friction").notNull().default(""),
+    shareWithTrial: boolean("share_with_trial").notNull().default(false),
+    createdAt: created(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+    version: version(),
+  },
+  (t) => [uniqueIndex("trial_responses_owner_week").on(t.accountId, t.weekKey)],
+);

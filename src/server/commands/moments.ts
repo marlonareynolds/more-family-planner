@@ -158,6 +158,8 @@ export const createMoment = defineCommand({
       })
       .returning();
     await ctx.audit("moment.create", "moment", m.id);
+    const [{ n }] = await ctx.tx.select({ n: sql<number>`count(*)::int` }).from(moments).where(eq(moments.householdId, ctx.household.id));
+    if (n === 1) await ctx.track("first_plan_created", p.kind);
     return { momentId: m.id, version: m.version };
   },
 });
@@ -288,6 +290,7 @@ export const shareMoment = defineCommand({
     }
     await ctx.bumpSchedule();
     await ctx.audit("moment.share", "moment", m.id);
+    await ctx.track("moment_shared", m.kind);
     return { momentId: m.id, reserved };
   },
 });
@@ -344,6 +347,7 @@ export const respondToMoment = defineCommand({
     });
     await ctx.bumpSchedule();
     await ctx.audit(`moment.${p.decision}`, "moment", m.id);
+    if (reserved) await ctx.track("moment_agreed", m.kind);
     return { momentId: m.id, reserved };
   },
 });
@@ -408,6 +412,7 @@ export const completeMoment = defineCommand({
     await ctx.tx.update(moments).set({ lifecycle: "completed", version: sql`${moments.version} + 1` }).where(eq(moments.id, m.id));
     await supersedeDeliveries(ctx.tx, m.id);
     await ctx.audit("moment.complete", "moment", m.id);
+    await ctx.track("moment_completed", m.kind);
     return { momentId: m.id };
   },
 });

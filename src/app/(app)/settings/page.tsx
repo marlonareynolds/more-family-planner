@@ -9,7 +9,7 @@ export const metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const { view, db, actor } = await loadRange(0, 1);
-  const [account] = await db.select({ timeZone: accounts.timeZone }).from(accounts).where(eq(accounts.id, actor.accountId));
+  const [account] = await db.select({ timeZone: accounts.timeZone, analyticsOptOut: accounts.analyticsOptOut }).from(accounts).where(eq(accounts.id, actor.accountId));
   return (
     <AppProvider value={infoFrom(view)}>
       <SettingsPanel
@@ -17,6 +17,7 @@ export default async function SettingsPage() {
         openInvite={view.openInvite}
         kids={view.children}
         profile={{ displayName: actor.displayName, timeZone: account?.timeZone ?? view.household.timeZone }}
+        analyticsOptOut={account?.analyticsOptOut ?? false}
       />
     </AppProvider>
   );

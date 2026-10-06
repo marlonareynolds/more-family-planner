@@ -5,6 +5,7 @@ import {
   accounts,
   careArrangements,
   checkins,
+  trialResponses,
   children,
   events,
   expenses,
@@ -40,6 +41,7 @@ export async function exportAccount(db: Db, actor: Actor) {
       .from(journalEntries)
       .where(and(eq(journalEntries.accountId, actor.accountId), isNull(journalEntries.deletedAt))),
     checkins: await db.select().from(checkins).where(eq(checkins.accountId, actor.accountId)),
+    trialResponses: await db.select().from(trialResponses).where(eq(trialResponses.accountId, actor.accountId)),
     reflections: await db.select().from(feedback).where(eq(feedback.accountId, actor.accountId)),
     preferences: await db.select().from(preferences).where(eq(preferences.accountId, actor.accountId)),
   };

@@ -13,6 +13,7 @@ const primary = [
 ];
 const secondary = [
   { href: "/holidays", label: "Holidays" },
+  { href: "/trial", label: "Trial" },
   { href: "/settings", label: "Settings" },
 ];
 
