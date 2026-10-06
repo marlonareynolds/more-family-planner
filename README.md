@@ -55,6 +55,15 @@ In a sandbox without Playwright's own browser, set `PW_CHROMIUM` to a Chromium b
 
 ## Deploy
 
+### Demo preview (no database account)
+
+Set `MORE_DEMO_DB=1`, `MORE_ALLOW_DEV_AUTH=1` and a long random
+`MORE_SESSION_SECRET` on the Vercel project. The app then runs on an
+embedded database in `/tmp` with synthetic sign-in, and shows a banner
+saying data can reset at any time. Never use this with real families.
+
+### Real deployment
+
 1. Create a Supabase project in London; run `pnpm db:migrate` with the direct `DATABASE_URL`.
 2. Import the repo in Vercel; set the variables in `.env.example`.
 3. The outbox cron in `vercel.json` runs daily, the Hobby plan limit.
