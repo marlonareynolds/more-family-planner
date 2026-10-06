@@ -81,6 +81,7 @@ export function WeekBoard({ week, mode = "week" }: { week: WeekView; mode?: "wee
                 <h2 id={`d-${date}`} className={cx("text-sm font-semibold uppercase tracking-wide", date === today ? "text-brand" : "text-ink-3")}>
                   {date === today ? "Today · " : ""}
                   {fmtDate(date)}
+                  {week.markers[date] && <span className="ml-2 rounded-full bg-family-soft px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-family">{week.markers[date]}</span>}
                 </h2>
                 {mode === "week" && view === "agenda" && (
                   <button className="rounded-full px-2 text-sm text-brand" onClick={() => setChooser(date)} aria-label={`Add on ${fmtDate(date)}`}>+ Add</button>

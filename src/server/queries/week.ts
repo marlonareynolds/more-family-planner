@@ -28,6 +28,7 @@ import { addDays, instantToLocalDate, isWeekKey, startOfLocalDate, weekKeyFor } 
 import type { Actor } from "../auth";
 import { loadBusy, loadEventOccurrences } from "./busy";
 import { STALE_AFTER_MS } from "../calendar-sync";
+import { bankHoliday } from "@/lib/bank-holidays";
 
 /**
  * The viewer-specific week projection (spec 12.2 GET /weeks/{weekKey}).
@@ -191,6 +192,8 @@ export interface WeekView {
   notifications: { id: string; text: string; createdAt: string; read: boolean; sourceType: string | null; sourceId: string | null }[];
   checkinDone: boolean;
   calendars: CalendarView[];
+  /** Public holiday names by date: markers only, not proof anyone is off. */
+  markers: Record<string, string>;
 }
 
 function hiddenLabel(m: MomentView | undefined): string | null {
@@ -545,6 +548,10 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     })),
     checkinDone: !!checkin,
     calendars,
+    markers: Object.fromEntries(dayList.flatMap((d) => {
+      const name = bankHoliday(d, tz);
+      return name ? [[d, name]] : [];
+    })),
   };
 }
 

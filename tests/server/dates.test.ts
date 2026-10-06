@@ -19,3 +19,12 @@ describe("important dates (spec 8.2)", () => {
     expect(await items(w.sam)).toEqual([]);
   });
 });
+
+describe("bank holidays (spec 8.4)", () => {
+  it("marks them on the week without making anyone free", async () => {
+    const w = await newWorld();
+    const week = await w.week(w.alex, "2026-12-21", NOW);
+    expect(week.markers).toEqual({ "2026-12-25": "Christmas Day" });
+    expect((await w.week(w.alex, "2026-12-28", NOW)).markers["2026-12-28"]).toBe("Boxing Day (substitute day)");
+  });
+});
