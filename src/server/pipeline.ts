@@ -100,7 +100,8 @@ function stableStringify(v: unknown): string {
 }
 
 function requestHash(e: Envelope): string {
-  const { idempotencyKey: _ignored, ...rest } = e;
+  const rest: Partial<Envelope> = { ...e };
+  delete rest.idempotencyKey;
   return createHash("sha256").update(stableStringify(rest)).digest("hex");
 }
 

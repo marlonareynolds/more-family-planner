@@ -11,7 +11,7 @@ export interface World {
   alex: Actor;
   sam: Actor;
   householdId: string;
-  run: (actor: Actor, command: string, payload: unknown, extra?: Record<string, unknown>) => Promise<any>;
+  run: (actor: Actor, command: string, payload: unknown, extra?: Record<string, unknown>) => Promise<any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- test helper returns command-specific results
   week: (actor: Actor, weekKey: string, now?: Date) => ReturnType<typeof getWeek>;
 }
 
