@@ -161,7 +161,7 @@ export interface AttentionItem {
   key: string;
   priority: number;
   text: string;
-  action: "respond" | "review" | "task" | "care" | "care-gap" | "reflect" | "complete" | "checkin" | "invite" | "calendar";
+  action: "respond" | "review" | "task" | "care" | "care-gap" | "reflect" | "complete" | "checkin" | "invite" | "calendar" | "date-ahead";
   targetId?: string;
   date?: string;
 }
@@ -510,7 +510,8 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     .from(checkins)
     .where(and(eq(checkins.accountId, viewer), eq(checkins.weekKey, weekKeyFor(fromDate))));
 
-  const attention = buildAttention({ viewer, momentsOut, careDays, careAwaitingMe, kids, adults, now, tz, checkinDone: !!checkin, openInvite: !!invite, calendars });
+  const datesAhead = await importantDatesAhead(db, household.id, viewer, now, tz);
+  const attention = buildAttention({ viewer, momentsOut, careDays, careAwaitingMe, kids, adults, now, tz, checkinDone: !!checkin, openInvite: !!invite, calendars, datesAhead });
 
   return {
     me: { id: viewer, displayName: adults.find((a) => a.id === viewer)?.displayName ?? actor.displayName },
@@ -547,6 +548,34 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
   };
 }
 
+/**
+ * Yearly all-day dates (birthdays, anniversaries) coming up in the next two
+ * weeks that this viewer can see, unless a plan already exists that day
+ * (spec 8.2: recurring important dates).
+ */
+async function importantDatesAhead(db: Db, householdId: string, viewer: string, now: Date, tz: string) {
+  const start = startOfLocalDate(instantToLocalDate(now.getTime(), tz), tz);
+  const horizon = { start, end: start + 15 * 86_400_000 };
+  const occ = await loadEventOccurrences(db, householdId, horizon);
+  const planned = await db
+    .select({ startAt: moments.startAt })
+    .from(moments)
+    .where(and(eq(moments.householdId, householdId), gt(moments.endAt, new Date(horizon.start)), lt(moments.startAt, new Date(horizon.end)), sql`${moments.lifecycle} <> 'cancelled'`, sql`${moments.kind} <> 'me'`));
+  const plannedDays = new Set(planned.map((m) => instantToLocalDate(m.startAt.getTime(), tz)));
+  const today = instantToLocalDate(now.getTime(), tz);
+  const out: { id: string; title: string; date: string; days: number }[] = [];
+  for (const o of occ) {
+    const rule = o.row.rule as { freq?: string } | null;
+    if (!o.row.allDay || rule?.freq !== "YEARLY" || o.row.feedId) continue;
+    if (o.row.ownerId !== viewer && !canSeeDetails(o.row, viewer)) continue;
+    const date = instantToLocalDate(o.start, tz);
+    if (date < today || plannedDays.has(date)) continue;
+    const days = Math.round((Date.parse(`${date}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000);
+    if (days <= 14) out.push({ id: o.eventId, title: o.row.title, date, days });
+  }
+  return out.sort((a, b) => a.days - b.days).slice(0, 3);
+}
+
 function buildAttention(input: {
   viewer: string;
   momentsOut: MomentView[];
@@ -559,6 +588,7 @@ function buildAttention(input: {
   checkinDone: boolean;
   openInvite: boolean;
   calendars: CalendarView[];
+  datesAhead: { id: string; title: string; date: string; days: number }[];
 }): AttentionItem[] {
   const { viewer, now } = input;
   const out: AttentionItem[] = [];
@@ -601,6 +631,10 @@ function buildAttention(input: {
   }
   for (const c of input.calendars.filter((c) => c.mine && !c.lastSuccessAt && c.lastError)) {
     out.push({ key: `calendar:${c.id}`, priority: 3, text: `“${c.label}” couldn't be read. Check the link in Settings`, action: "calendar", targetId: c.id });
+  }
+  for (const d of input.datesAhead) {
+    const when = d.days === 0 ? "is today" : d.days === 1 ? "is tomorrow" : `is in ${d.days} days`;
+    out.push({ key: `date:${d.id}:${d.date}`, priority: 3, text: `“${d.title}” ${when}. Want to plan something?`, action: "date-ahead", targetId: d.id, date: d.date });
   }
   if (input.adults.length < 2 && !input.openInvite) {
     out.push({ key: "invite", priority: 5, text: "Invite your partner when you're ready", action: "invite" });

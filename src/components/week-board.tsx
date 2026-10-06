@@ -35,6 +35,7 @@ export function WeekBoard({ week, mode = "week" }: { week: WeekView; mode?: "wee
   const [view, setView] = useState<"agenda" | "grid">("agenda");
   const [editingEvent, setEditingEvent] = useState<WeekEvent | null>(null);
   const [newEvent, setNewEvent] = useState<string | null>(null);
+  const [newDate, setNewDate] = useState<string | null>(null);
   const [newMoment, setNewMoment] = useState<{ kind: MomentKind; date: string } | null>(null);
   const [chooser, setChooser] = useState<string | null>(null);
   const days = itemsByDay(week, app.timeZone);
@@ -110,12 +111,14 @@ export function WeekBoard({ week, mode = "week" }: { week: WeekView; mode?: "wee
             <Button className="justify-start" onClick={() => { setNewMoment({ kind: "me", date: chooser }); setChooser(null); }}>◐ Time for me</Button>
             <Button className="justify-start" onClick={() => { setNewMoment({ kind: "us", date: chooser }); setChooser(null); }}>♥ Time for us</Button>
             <Button className="justify-start" onClick={() => { setNewMoment({ kind: "family", date: chooser }); setChooser(null); }}>✿ Family time</Button>
+            <Button className="justify-start" onClick={() => { setNewDate(chooser); setChooser(null); }}>★ Birthday, anniversary or other yearly date</Button>
             <Link className="rounded-full border border-line px-4 py-2.5 text-[15px]" href={`/holidays?date=${chooser}`}>☂ Childcare</Link>
           </div>
         </Dialog>
       )}
       {editingEvent && <EventEditor open onClose={() => setEditingEvent(null)} event={editingEvent} defaultDate={week.weekKey} key={`${editingEvent.id}-${editingEvent.recurrenceId}`} />}
       {newEvent && <EventEditor open onClose={() => setNewEvent(null)} defaultDate={newEvent} />}
+      {newDate && <EventEditor open onClose={() => setNewDate(null)} defaultDate={newDate} important />}
       {newMoment && <MomentEditor open onClose={() => setNewMoment(null)} template={{ kind: newMoment.kind, title: "" }} defaultDate={newMoment.date} />}
     </div>
   );

@@ -22,21 +22,23 @@ interface Rule {
  * The one event editor (spec 8.4). Repeating events ask whether a change
  * applies to this date, this and future dates, or the whole series.
  */
-export function EventEditor({ open, onClose, event, defaultDate }: { open: boolean; onClose: () => void; event?: WeekEvent | null; defaultDate: string }) {
+export function EventEditor({ open, onClose, event, defaultDate, important }: { open: boolean; onClose: () => void; event?: WeekEvent | null; defaultDate: string; important?: boolean }) {
   const app = useApp();
   const { run, pending, error } = useCommand(app.householdId);
   const editing = !!event;
   const rule = (event?.rule ?? null) as Rule | null;
 
   const [title, setTitle] = useState(event?.title ?? "");
-  const [span, setSpan] = useState<SpanValue>(event ? spanFrom(event.start, event.end, app.timeZone, event.allDay) : defaultSpan(defaultDate, "09:00", "10:00"));
+  const [span, setSpan] = useState<SpanValue>(
+    event ? spanFrom(event.start, event.end, app.timeZone, event.allDay) : { ...defaultSpan(defaultDate, "09:00", "10:00"), allDay: !!important },
+  );
   const [people, setPeople] = useState({ adultIds: event?.adultIds ?? [app.me.id], childIds: event?.childIds ?? [] });
   const [visibility, setVisibility] = useState<WeekEvent["visibility"]>(event?.visibility ?? "shared");
   const [location, setLocation] = useState(event?.location ?? "");
   const [notes, setNotes] = useState(event?.notes ?? "");
   const [travelBefore, setTravelBefore] = useState(String(event?.travelBeforeMinutes ?? 0));
   const [travelAfter, setTravelAfter] = useState(String(event?.travelAfterMinutes ?? 0));
-  const [freq, setFreq] = useState<Freq>(rule?.freq ?? "none");
+  const [freq, setFreq] = useState<Freq>(rule?.freq ?? (important ? "YEARLY" : "none"));
   const [byDay, setByDay] = useState<(typeof DAYS)[number][]>(rule?.byDay ?? []);
   const [count, setCount] = useState(rule?.count ? String(rule.count) : "");
   const [scope, setScope] = useState<"occurrence" | "future" | "series">(event?.recurring ? "occurrence" : "series");
@@ -90,7 +92,7 @@ export function EventEditor({ open, onClose, event, defaultDate }: { open: boole
     <Dialog
       open={open}
       onClose={onClose}
-      title={editing ? "Edit event" : "Add to the diary"}
+      title={editing ? "Edit event" : important ? "Add an important date" : "Add to the diary"}
       footer={
         confirmDelete ? (
           <>
