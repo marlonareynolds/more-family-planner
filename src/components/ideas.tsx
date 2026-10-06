@@ -19,6 +19,10 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
   const [setting, setSetting] = useState<Setting | "any">("any");
   // A heavy week (from your own private check-in) starts with low-effort ideas.
   const [lowEffort, setLowEffort] = useState(lighterWeek);
+  const [maxMinutes, setMaxMinutes] = useState<string>("any");
+  const [rainProof, setRainProof] = useState(false);
+  const [calm, setCalm] = useState(false);
+  const [stepFree, setStepFree] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const [planning, setPlanning] = useState<Activity | null>(null);
   const bands = [...new Set(app.children.map((c) => c.ageBand as AgeBand))];
@@ -29,6 +33,10 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
     maxCostMinor: maxCost === "any" ? null : Number(maxCost),
     setting,
     lowEffort,
+    rainProof,
+    calm,
+    stepFree,
+    maxMinutes: maxMinutes === "any" ? null : Number(maxMinutes),
   });
   const avoided = matches.filter((a) => guidance[a.key]?.guidance === "avoid");
   const shown = showHidden ? matches : matches.filter((a) => guidance[a.key]?.guidance !== "avoid");
@@ -47,6 +55,16 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
             </select>
           )}
         </Field>
+        <Field label="Time">
+          {(id) => (
+            <select id={id} className={`${inputClass} w-auto`} value={maxMinutes} onChange={(e) => setMaxMinutes(e.target.value)}>
+              <option value="any">Any length</option>
+              <option value="60">An hour or less</option>
+              <option value="120">Up to 2 hours</option>
+              <option value="240">Up to half a day</option>
+            </select>
+          )}
+        </Field>
         <Segmented
           label="Setting"
           value={setting}
@@ -59,6 +77,9 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
           ]}
         />
         <Checkbox checked={lowEffort} onChange={setLowEffort} label="Low effort this week" />
+        <Checkbox checked={rainProof} onChange={setRainProof} label="Works if it rains" />
+        <Checkbox checked={calm} onChange={setCalm} label="Calm and quiet" />
+        <Checkbox checked={stepFree} onChange={setStepFree} label="Step-free" />
       </div>
       {shown.length === 0 ? (
         <EmptyState title="Nothing in the starter ideas fits all of that.">Try a wider budget or setting, or plan your own.</EmptyState>
@@ -79,8 +100,10 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
                   </div>
                   <p className="text-sm text-ink-2">{simplify && a.simpler ? a.simpler : a.summary}</p>
                   <p className="text-xs text-ink-3">
-                    {a.typicalCostMinor === 0 ? "Free" : `About £${Math.round(a.typicalCostMinor / 100)}`} · {Math.round(a.durationMinutes / 15) * 15} min · {a.preparation} prep
+                    {a.typicalCostMinor === 0 ? "Free" : `About £${Math.round(a.typicalCostMinor / 100)}`} · {a.durationMinutes >= 600 ? "overnight" : `${Math.round(a.durationMinutes / 15) * 15} min`} · {a.preparation} prep
                     {a.weatherSensitive ? " · weather dependent" : ""}
+                    {a.sensoryLoad === "high" ? " · busy and loud" : a.sensoryLoad === "low" ? " · calm" : ""}
+                    {a.stepFree ? " · usually step-free" : ""}
                   </p>
                   {a.weatherSensitive && a.backup && <p className="text-xs text-ink-3">If it rains: {a.backup}</p>}
                   {a.accessNotes && <p className="text-xs text-ink-3">{a.accessNotes}</p>}
