@@ -11,7 +11,10 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx scripts/migrate.ts"
+    "db:migrate": "tsx scripts/migrate.mts",
+    "db:backup": "tsx scripts/backup.mts",
+    "db:rehearse": "tsx scripts/restore-rehearsal.mts",
+    "db:restore": "tsx scripts/restore.mts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

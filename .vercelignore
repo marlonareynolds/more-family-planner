@@ -4,3 +4,4 @@ playwright-report
 .next
 .env*
 !.env.example
+backups

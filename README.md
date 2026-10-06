@@ -68,7 +68,10 @@ saying data can reset at any time. Never use this with real families.
    Use the transaction pooler URL (port 6543) for the app itself. In Supabase
    Auth, set the Site URL to the app's address and allow `<app>/auth/callback`.
 2. Import the repo in Vercel; set the variables in `.env.example`.
-3. The outbox cron in `vercel.json` runs daily, the Hobby plan limit.
+3. Backups: add `DATABASE_URL` and `BACKUP_PASSPHRASE` as GitHub Actions
+   secrets; a nightly job backs up, restores into an isolated database and
+   verifies. See [docs/restore.md](docs/restore.md).
+4. The outbox cron in `vercel.json` runs daily, the Hobby plan limit.
    On Pro, change it to every five minutes for timely reminders.
 
 ## Not switched on yet
