@@ -82,6 +82,10 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   await sam.getByRole("button", { name: "Yes, let's do it" }).click();
   await expect(sam.getByText("Waiting for your answer")).toHaveCount(0);
 
+  // Alex hears about it straight away, not at the next daily run
+  await go(alex, "/today");
+  await expect(alex.getByText(/said yes to your plan/)).toBeVisible();
+
   // Our Week shows it to both
   await go(alex, `/week`);
   await axe(alex);

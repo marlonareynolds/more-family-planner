@@ -97,7 +97,7 @@ export async function currentIdentity(): Promise<Identity | null> {
         try {
           for (const c of list) jar.set(c.name, c.value, c.options);
         } catch {
-          // Server components cannot set cookies; the proxy refreshes them.
+          // Server components cannot set cookies; src/proxy.ts refreshes them.
         }
       },
     },

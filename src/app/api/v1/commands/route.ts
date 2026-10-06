@@ -1,6 +1,9 @@
+import { after } from "next/server";
+import { getDb } from "@/db/client";
 import { requireActor } from "@/server/auth";
 import { executeCommand } from "@/server/commands";
 import { assertSameOrigin, errorResponse, noStore } from "@/server/http";
+import { processOutbox } from "@/server/outbox";
 
 export async function POST(req: Request) {
   try {
@@ -8,6 +11,15 @@ export async function POST(req: Request) {
     const actor = await requireActor();
     const body = await req.json();
     const result = await executeCommand(actor, body);
+    // Deliver whatever this change made due straight away; the daily cron
+    // only catches anything left behind (future reminders, failed runs).
+    after(async () => {
+      try {
+        await processOutbox(await getDb(), new Date(), 25);
+      } catch (err) {
+        console.error("outbox drain after command failed", err);
+      }
+    });
     return Response.json(result, { headers: noStore });
   } catch (err) {
     return errorResponse(err);
