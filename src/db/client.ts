@@ -42,9 +42,12 @@ async function connect(): Promise<Db> {
     const client = postgres(url, { max: 5, prepare: false });
     return drizzle(client, { schema }) as unknown as Db;
   }
-  if (process.env.NODE_ENV === "production") {
+  // A throwaway demo deployment may use the embedded database in /tmp:
+  // data lives only as long as the server instance and can reset at any time.
+  const demo = process.env.MORE_DEMO_DB === "1";
+  if (process.env.NODE_ENV === "production" && !demo) {
     throw new Error("DATABASE_URL is required in production");
   }
   const { createPgliteDb } = await import("./pglite");
-  return createPgliteDb(process.env.PGLITE_DIR ?? ".data/pglite");
+  return createPgliteDb(process.env.PGLITE_DIR ?? (demo ? "/tmp/more-pglite" : ".data/pglite"));
 }

@@ -4,6 +4,8 @@ const nextConfig: NextConfig = {
   // PGlite loads its WASM and extension bundles from its own package
   // directory, so it must not be bundled.
   serverExternalPackages: ["@electric-sql/pglite"],
+  // The embedded database applies migrations at start-up (demo deployments).
+  outputFileTracingIncludes: { "/**": ["./drizzle/**/*"] },
   poweredByHeader: false,
   async headers() {
     return [
