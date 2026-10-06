@@ -1,8 +1,10 @@
 import "server-only";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { getDb } from "@/db/client";
 import { currentWeekKey, isWeekKey, instantToLocalDate } from "@/domain/time";
 import { track } from "./analytics";
+import { syncDue } from "./calendar-sync";
 import { currentActor } from "./auth";
 import { getProjection, getWeek, householdFor } from "./queries/week";
 
@@ -16,6 +18,8 @@ export async function requireHousehold() {
   // One "active day" per adult per local day, for the trial's engagement count.
   const day = instantToLocalDate(Date.now(), household.timeZone);
   await track(db, { type: "active_day", accountId: actor.accountId, householdId: household.id, dedupeKey: `active:${actor.accountId}:${day}` }).catch(() => {});
+  // Refresh this adult's own calendar links in the background when they're over 3 hours old.
+  after(() => syncDue(db, 3 * 3_600_000, { accountId: actor.accountId, limit: 5 }).catch(() => {}));
   return { actor, db, household };
 }
 

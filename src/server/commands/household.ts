@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   accounts,
   auditEvents,
+  calendarFeeds,
   careArrangements,
   children,
   events,
@@ -18,6 +19,7 @@ import { DomainError } from "@/domain/errors";
 import { isValidTimeZone } from "@/domain/time";
 import { defineCommand, assertVersion, type CommandContext } from "../pipeline";
 import { currentAdults, release, requiredText, supersedeDeliveries } from "./helpers";
+import { disconnectFeed } from "./calendars";
 
 /** The supported household shape for this release (spec 3.2, D-02). */
 export const MAX_ADULTS = 2;
@@ -152,6 +154,10 @@ export const joinHousehold = defineCommand({
  */
 async function detachAdult(ctx: CommandContext, accountId: string, reason: string): Promise<void> {
   const { tx, household, now } = ctx;
+
+  // Calendar links go with the adult: their imported copies leave too.
+  const feeds = await tx.select({ id: calendarFeeds.id }).from(calendarFeeds).where(and(eq(calendarFeeds.householdId, household.id), eq(calendarFeeds.accountId, accountId)));
+  for (const f of feeds) await disconnectFeed(ctx, f.id);
 
   await tx
     .update(events)

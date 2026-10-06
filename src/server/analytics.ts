@@ -18,6 +18,7 @@ export const PRODUCT_EVENT_TYPES = [
   "care_gap_resolved",
   "save_conflict",
   "trial_response_saved",
+  "calendar_connected",
   "active_day",
 ] as const;
 export type ProductEventType = (typeof PRODUCT_EVENT_TYPES)[number];

@@ -59,6 +59,12 @@ export function WeekBoard({ week, mode = "week" }: { week: WeekView; mode?: "wee
           </div>
         </div>
       )}
+      {mode === "week" && week.calendars.some((c) => c.stale) && (
+        <p className="mb-4 rounded-xl bg-warn/10 px-3 py-2 text-sm text-warn">
+          {week.calendars.filter((c) => c.stale).map((c) => (c.mine ? `Your “${c.label}” calendar` : `${app.nameOf(c.ownerId)}'s calendar`)).join(" and ")} isn&apos;t up to date, so free time shown here may be wrong.{" "}
+          {week.calendars.some((c) => c.stale && c.mine) && <Link className="underline" href="/settings#calendars">Check it</Link>}
+        </p>
+      )}
       {mode === "week" && week.money.estimateMinor + week.money.netPaidMinor > 0 && (
         <p className="mb-4 text-sm text-ink-2">
           This week&apos;s plans: expected {fmtMoney(week.money.estimateMinor)}, committed {fmtMoney(week.money.committedMinor)}, paid {fmtMoney(week.money.netPaidMinor)}
@@ -117,7 +123,7 @@ export function WeekBoard({ week, mode = "week" }: { week: WeekView; mode?: "wee
 
 function EventRow({ e, onOpen, compact }: { e: WeekEvent; onOpen: () => void; compact?: boolean }) {
   const app = useApp();
-  const canEdit = e.mine || e.visibility === "shared";
+  const canEdit = !e.imported && (e.mine || e.visibility === "shared");
   const who = [...e.adultIds.map((id) => (id === app.me.id ? "Me" : app.nameOf(id))), ...e.childIds.map(app.childName)];
   const body = (
     <>
@@ -128,6 +134,7 @@ function EventRow({ e, onOpen, compact }: { e: WeekEvent; onOpen: () => void; co
         {e.mine && e.visibility !== "shared" && <span className="ml-2 align-middle"><Badge>{e.visibility === "private" ? "Only me" : "Busy only"}</Badge></span>}
       </p>
       {!compact && who.length > 0 && <p className="text-sm text-ink-2">{who.join(", ")}</p>}
+      {!compact && e.importedFrom && <p className="text-xs text-ink-3">From {e.importedFrom} · change it there</p>}
       {!compact && e.location && <p className="text-sm text-ink-3">📍 {e.location}</p>}
     </>
   );

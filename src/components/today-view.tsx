@@ -67,6 +67,7 @@ export function TodayView({ data }: { data: WeekView }) {
       <SectionTitle>Other things</SectionTitle>
       <div className="flex flex-wrap gap-2">
         {!data.checkinDone && <Button onClick={() => setCheckin(true)}>Quick private check-in</Button>}
+        {data.attention.some((a) => a.action === "calendar") && <Link href="/settings#calendars" className="inline-flex min-h-11 items-center rounded-full border border-line px-4">Check calendars</Link>}
         {data.attention.some((a) => a.action === "invite") && <Link href="/settings" className="inline-flex min-h-11 items-center rounded-full border border-line px-4">Invite your partner</Link>}
       </div>
       {checkin && <CheckinDialog onClose={() => setCheckin(false)} weekKey={mondayOf(today)} />}

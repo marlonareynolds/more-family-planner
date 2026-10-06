@@ -3,6 +3,7 @@ import type { Db } from "@/db/client";
 import {
   acceptances,
   accounts,
+  calendarFeeds,
   careArrangements,
   careRequirements,
   checkins,
@@ -26,6 +27,7 @@ import { hiddenReason, isAgreed, latestDecision, readiness, stageLabel, type Dec
 import { addDays, instantToLocalDate, isWeekKey, startOfLocalDate, weekKeyFor } from "@/domain/time";
 import type { Actor } from "../auth";
 import { loadBusy, loadEventOccurrences } from "./busy";
+import { STALE_AFTER_MS } from "../calendar-sync";
 
 /**
  * The viewer-specific week projection (spec 12.2 GET /weeks/{weekKey}).
@@ -62,6 +64,23 @@ export interface WeekEvent {
   localStart: string;
   durationMinutes: number;
   rule: unknown;
+  /** Imported from a connected calendar: read-only here. Label shown to its owner only. */
+  imported: boolean;
+  importedFrom: string | null;
+}
+
+/** A connected calendar's health. Partners see only that it exists and whether it's current. */
+export interface CalendarView {
+  id: string;
+  ownerId: string;
+  mine: boolean;
+  label: string;
+  visibility: "shared" | "busy_only" | "private";
+  version: number;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  eventCount: number;
+  stale: boolean;
 }
 
 export interface MomentView {
@@ -142,7 +161,7 @@ export interface AttentionItem {
   key: string;
   priority: number;
   text: string;
-  action: "respond" | "review" | "task" | "care" | "care-gap" | "reflect" | "complete" | "checkin" | "invite";
+  action: "respond" | "review" | "task" | "care" | "care-gap" | "reflect" | "complete" | "checkin" | "invite" | "calendar";
   targetId?: string;
   date?: string;
 }
@@ -171,6 +190,7 @@ export interface WeekView {
   attention: AttentionItem[];
   notifications: { id: string; text: string; createdAt: string; read: boolean; sourceType: string | null; sourceId: string | null }[];
   checkinDone: boolean;
+  calendars: CalendarView[];
 }
 
 function hiddenLabel(m: MomentView | undefined): string | null {
@@ -224,6 +244,22 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
 
   // ── Events (masked per viewer) ──
   const occurrences = await loadEventOccurrences(db, household.id, horizon);
+  const feedRows = await db.select().from(calendarFeeds).where(eq(calendarFeeds.householdId, household.id));
+  const calendars: CalendarView[] = feedRows.map((f) => {
+    const mine = f.accountId === viewer;
+    return {
+      id: f.id,
+      ownerId: f.accountId,
+      mine,
+      label: mine ? f.label : "Calendar",
+      visibility: f.visibility,
+      version: f.version,
+      lastSuccessAt: f.lastSuccessAt?.toISOString() ?? null,
+      lastError: mine ? f.lastError : null,
+      eventCount: mine ? f.eventCount : 0,
+      stale: !f.lastSuccessAt || now.getTime() - f.lastSuccessAt.getTime() > STALE_AFTER_MS,
+    };
+  });
   const eventsOut: WeekEvent[] = [];
   for (const o of occurrences) {
     const r = o.row;
@@ -253,6 +289,8 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
       localStart: r.localStart,
       durationMinutes: r.durationMinutes,
       rule: hidden ? null : r.rule,
+      imported: !!r.feedId,
+      importedFrom: mine && r.feedId ? (feedRows.find((f) => f.id === r.feedId)?.label ?? null) : null,
     });
   }
 
@@ -472,7 +510,7 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     .from(checkins)
     .where(and(eq(checkins.accountId, viewer), eq(checkins.weekKey, weekKeyFor(fromDate))));
 
-  const attention = buildAttention({ viewer, momentsOut, careDays, careAwaitingMe, kids, adults, now, tz, checkinDone: !!checkin, openInvite: !!invite });
+  const attention = buildAttention({ viewer, momentsOut, careDays, careAwaitingMe, kids, adults, now, tz, checkinDone: !!checkin, openInvite: !!invite, calendars });
 
   return {
     me: { id: viewer, displayName: adults.find((a) => a.id === viewer)?.displayName ?? actor.displayName },
@@ -505,6 +543,7 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
       sourceId: n.sourceId,
     })),
     checkinDone: !!checkin,
+    calendars,
   };
 }
 
@@ -519,6 +558,7 @@ function buildAttention(input: {
   tz: string;
   checkinDone: boolean;
   openInvite: boolean;
+  calendars: CalendarView[];
 }): AttentionItem[] {
   const { viewer, now } = input;
   const out: AttentionItem[] = [];
@@ -554,6 +594,13 @@ function buildAttention(input: {
         out.push({ key: `gap:${day.date}:${g.childIds.join(",")}:${g.reason}`, priority: 2, text: `${names(g.childIds)} still needs care (${g.reason})`, action: "care-gap", date: day.date });
       }
     }
+  }
+  // A stale calendar makes availability uncertain (spec 8.11): say so.
+  for (const c of input.calendars.filter((c) => c.mine && c.stale && c.lastSuccessAt)) {
+    out.push({ key: `calendar:${c.id}`, priority: 3, text: `“${c.label}” hasn't updated since ${c.lastSuccessAt!.slice(0, 10)}, so free time may be wrong`, action: "calendar", targetId: c.id });
+  }
+  for (const c of input.calendars.filter((c) => c.mine && !c.lastSuccessAt && c.lastError)) {
+    out.push({ key: `calendar:${c.id}`, priority: 3, text: `“${c.label}” couldn't be read. Check the link in Settings`, action: "calendar", targetId: c.id });
   }
   if (input.adults.length < 2 && !input.openInvite) {
     out.push({ key: "invite", priority: 5, text: "Invite your partner when you're ready", action: "invite" });

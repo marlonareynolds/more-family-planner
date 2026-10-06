@@ -6,6 +6,7 @@ import { useApp } from "./app-context";
 import { fmtDateTime } from "./format";
 import { Badge, Button, Card, Checkbox, Dialog, ErrorNote, Field, SectionTitle, inputClass } from "./ui";
 import { useCommand } from "./use-command";
+import { CalendarSettings } from "./calendar-settings";
 
 type Child = WeekView["children"][number];
 const AGE_BANDS = ["0-4", "5-7", "8-11", "12-15", "16+"] as const;
@@ -36,12 +37,14 @@ export function SettingsPanel({
   kids,
   profile,
   analyticsOptOut,
+  calendars,
 }: {
   household: WeekView["household"];
   openInvite: WeekView["openInvite"];
   kids: Child[];
   profile: { displayName: string; timeZone: string };
   analyticsOptOut: boolean;
+  calendars: WeekView["calendars"];
 }) {
   return (
     <div className="max-w-2xl">
@@ -50,6 +53,7 @@ export function SettingsPanel({
       <HouseholdDetails household={household} />
       <Adults openInvite={openInvite} />
       <Children kids={kids} />
+      <CalendarSettings calendars={calendars} />
       <YourData analyticsOptOut={analyticsOptOut} />
       <Leaving household={household} />
     </div>

@@ -18,6 +18,7 @@ export default async function SettingsPage() {
         kids={view.children}
         profile={{ displayName: actor.displayName, timeZone: account?.timeZone ?? view.household.timeZone }}
         analyticsOptOut={account?.analyticsOptOut ?? false}
+        calendars={view.calendars}
       />
     </AppProvider>
   );

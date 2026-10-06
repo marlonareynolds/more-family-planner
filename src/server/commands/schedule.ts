@@ -94,6 +94,7 @@ function rowValues(ctx: CommandContext, f: EventFields) {
 async function loadEvent(ctx: CommandContext, eventId: string): Promise<EventRow> {
   const [row] = await ctx.tx.select().from(events).where(and(eq(events.id, eventId), eq(events.householdId, ctx.household.id)));
   if (!row || row.cancelledAt) throw new DomainError("NOT_FOUND", "That event could not be found.");
+  if (row.feedId) throw new DomainError("CONFLICT", "This comes from a connected calendar. Change it there and it will update here.");
   // Private and busy-only items can only be changed by their owner.
   if (row.visibility !== "shared" && row.ownerId !== ctx.actor.accountId) {
     throw new DomainError("NOT_FOUND", "That event could not be found.");

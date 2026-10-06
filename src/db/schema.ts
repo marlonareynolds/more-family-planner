@@ -12,6 +12,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  type AnyPgColumn,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -135,6 +136,10 @@ export const events = pgTable(
     childIds: uuid("child_ids").array().notNull().default(sql`'{}'::uuid[]`),
     /** Set when a "this and future" edit split this series from another. */
     splitFromId: uuid("split_from_id"),
+    /** Imported from a calendar feed: read-only here, replaced on each sync. */
+    feedId: uuid("feed_id").references((): AnyPgColumn => calendarFeeds.id),
+    /** The provider's identity for this occurrence (UID plus original start). */
+    externalId: text("external_id"),
     createdAt: created(),
     cancelledAt: ts("cancelled_at"),
     version: version(),
@@ -142,7 +147,34 @@ export const events = pgTable(
   (t) => [
     index("events_household_time").on(t.householdId, t.startAt),
     index("events_household_series").on(t.householdId).where(sql`${t.rule} is not null`),
+    uniqueIndex("events_feed_external").on(t.feedId, t.externalId).where(sql`${t.feedId} is not null`),
   ],
+);
+
+/**
+ * A read-only calendar subscription (spec 8.11): one adult's iCalendar link,
+ * imported as their own busy time. The link is a secret: it never leaves the
+ * server and is never shown to the partner.
+ */
+export const calendarFeeds = pgTable(
+  "calendar_feeds",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    accountId: uuid("account_id").notNull().references(() => accounts.id),
+    label: text("label").notNull(),
+    url: text("url").notNull(),
+    /** How imported items appear to the partner. */
+    visibility: text("visibility", { enum: ["shared", "busy_only", "private"] }).notNull().default("busy_only"),
+    lastAttemptAt: ts("last_attempt_at"),
+    lastSuccessAt: ts("last_success_at"),
+    /** A short code when the last sync failed, e.g. "unreachable". */
+    lastError: text("last_error"),
+    eventCount: integer("event_count").notNull().default(0),
+    createdAt: created(),
+    version: version(),
+  },
+  (t) => [index("calendar_feeds_owner").on(t.accountId), index("calendar_feeds_household").on(t.householdId)],
 );
 
 export const eventExceptions = pgTable(
