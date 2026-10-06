@@ -64,7 +64,9 @@ saying data can reset at any time. Never use this with real families.
 
 ### Real deployment
 
-1. Create a Supabase project in London; run `pnpm db:migrate` with the direct `DATABASE_URL`.
+1. Create a Supabase project in London; run `npm run db:migrate` with the direct `DATABASE_URL`.
+   Use the transaction pooler URL (port 6543) for the app itself. In Supabase
+   Auth, set the Site URL to the app's address and allow `<app>/auth/callback`.
 2. Import the repo in Vercel; set the variables in `.env.example`.
 3. The outbox cron in `vercel.json` runs daily, the Hobby plan limit.
    On Pro, change it to every five minutes for timely reminders.
@@ -74,8 +76,10 @@ saying data can reset at any time. Never use this with real families.
 - The AI concierge is off: no paid API calls until the founder approves.
 - Email and push delivery: notifications are stored in-app only; no
   message is sent to anyone.
-- Row-level security policies: access is enforced in the server layer;
-  RLS is a planned second line of defence.
+- Row-level security policies: access is enforced in the server layer.
+  RLS is switched on with no policies (migration 0002), so Supabase's
+  public Data API can read nothing; per-household policies are a planned
+  second line of defence.
 - The activity catalogue is illustrative starter content and has not been
   expert-reviewed.
 - End-to-end encryption is not offered and is not claimed.

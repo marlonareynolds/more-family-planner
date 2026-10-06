@@ -15,6 +15,13 @@
       "when": 1791298634851,
       "tag": "0001_reservation_exclusion",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791306809246,
+      "tag": "0002_lock_data_api",
+      "breakpoints": true
     }
   ]
 }
