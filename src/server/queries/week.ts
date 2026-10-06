@@ -1,0 +1,557 @@
+import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import type { Db } from "@/db/client";
+import {
+  acceptances,
+  accounts,
+  careArrangements,
+  careRequirements,
+  checkins,
+  children,
+  expenses,
+  feedback,
+  households,
+  invitations,
+  memberships,
+  moments,
+  notifications,
+  paymentTransactions,
+  preparationTasks,
+} from "@/db/schema";
+import { canSeeDetails, findConflicts, type Busy } from "@/domain/availability";
+import { coverageFor, groupCoverage, type CareArrangement, type CoverageState } from "@/domain/care";
+import { DomainError } from "@/domain/errors";
+import type { Interval } from "@/domain/intervals";
+import { summarise, type ExpenseSummary } from "@/domain/money";
+import { isAgreed, latestDecision, readiness, stageLabel, type Decision, type ReadinessGap } from "@/domain/moments";
+import { addDays, instantToLocalDate, isWeekKey, startOfLocalDate, weekKeyFor } from "@/domain/time";
+import type { Actor } from "../auth";
+import { loadBusy, loadEventOccurrences } from "./busy";
+
+/**
+ * The viewer-specific week projection (spec 12.2 GET /weeks/{weekKey}).
+ * Everything here is filtered for the signed-in adult: a partner's private
+ * items appear only as "Busy", private drafts not at all, and no raw
+ * check-in answer or reflection is ever included (INV-01, INV-11).
+ */
+
+export interface Person {
+  id: string;
+  displayName: string;
+}
+
+export interface WeekEvent {
+  kind: "event";
+  id: string;
+  recurrenceId: string | null;
+  recurring: boolean;
+  title: string;
+  notes: string;
+  location: string;
+  start: number;
+  end: number;
+  allDay: boolean;
+  adultIds: string[];
+  childIds: string[];
+  ownerId: string;
+  mine: boolean;
+  visibility: "shared" | "busy_only" | "private";
+  detailsHidden: boolean;
+  travelBeforeMinutes: number;
+  travelAfterMinutes: number;
+  version: number;
+  localStart: string;
+  durationMinutes: number;
+  rule: unknown;
+}
+
+export interface MomentView {
+  kind: "moment";
+  id: string;
+  momentKind: "me" | "us" | "family";
+  title: string;
+  notes: string;
+  location: string;
+  activityKey: string | null;
+  start: number;
+  end: number;
+  travelBeforeMinutes: number;
+  travelAfterMinutes: number;
+  organiserId: string;
+  participantIds: string[];
+  childIds: string[];
+  needsCare: boolean;
+  budgetMinor: number | null;
+  surprise: boolean;
+  surpriseHidden: boolean;
+  lifecycle: "draft" | "planned" | "completed" | "cancelled";
+  sharing: "private" | "shared";
+  materialVersion: number;
+  version: number;
+  review: "current" | "needs_review";
+  reviewReason: string | null;
+  agreed: boolean;
+  decisions: Record<string, Decision | null>;
+  myDecision: Decision | null;
+  ready: boolean;
+  missing: ReadinessGap[];
+  stage: string;
+  careState: CoverageState | "not_needed";
+  conflicts: { personId?: string; start: number; end: number; title?: string }[];
+  tasks: { id: string; title: string; ownerId: string; state: "open" | "done"; version: number }[];
+  myFeedbackSaved: boolean;
+  expenseId: string | null;
+}
+
+export interface CareDay {
+  date: string;
+  groups: {
+    childIds: string[];
+    state: CoverageState;
+    reason: string;
+    gaps: Interval[];
+    arrangements: ArrangementView[];
+  }[];
+}
+
+export interface ArrangementView {
+  id: string;
+  kind: "parent" | "external" | "not_needed";
+  responsibleAccountId: string | null;
+  providerName: string | null;
+  childIds: string[];
+  start: number;
+  end: number;
+  state: "proposed" | "confirmed" | "declined";
+  version: number;
+  note: string;
+  awaitingMe: boolean;
+}
+
+export interface ExpenseView extends ExpenseSummary {
+  id: string;
+  label: string;
+  sourceType: "moment" | "care" | "other";
+  sourceId: string | null;
+  activityDate: string;
+  version: number;
+}
+
+export interface AttentionItem {
+  key: string;
+  priority: number;
+  text: string;
+  action: "respond" | "review" | "task" | "care" | "care-gap" | "reflect" | "complete" | "checkin" | "invite";
+  targetId?: string;
+  date?: string;
+}
+
+export interface WeekView {
+  me: Person;
+  household: {
+    id: string;
+    name: string;
+    timeZone: string;
+    membershipRevision: number;
+    scheduleRevision: number;
+    version: number;
+  };
+  adults: Person[];
+  children: { id: string; preferredName: string; ageBand: string; needs: string; version: number }[];
+  openInvite: { id: string; expiresAt: string } | null;
+  weekKey: string;
+  days: string[];
+  events: WeekEvent[];
+  moments: MomentView[];
+  care: CareDay[];
+  careAwaitingMe: ArrangementView[];
+  expenses: ExpenseView[];
+  money: { estimateMinor: number; committedMinor: number; netPaidMinor: number };
+  attention: AttentionItem[];
+  notifications: { id: string; text: string; createdAt: string; read: boolean; sourceType: string | null; sourceId: string | null }[];
+  checkinDone: boolean;
+}
+
+export async function householdFor(db: Db, actor: Actor) {
+  const [row] = await db
+    .select({ h: households })
+    .from(memberships)
+    .innerJoin(households, eq(households.id, memberships.householdId))
+    .where(and(eq(memberships.accountId, actor.accountId), isNull(memberships.endsAt), isNull(households.deletedAt)));
+  return row?.h ?? null;
+}
+
+export async function getWeek(db: Db, actor: Actor, weekKey: string, now = new Date()): Promise<WeekView> {
+  if (!isWeekKey(weekKey)) throw new DomainError("VALIDATION", "A week must start on a Monday.");
+  return getProjection(db, actor, weekKey, 7, now);
+}
+
+/**
+ * A viewer-specific projection of `days` local days from `fromDate`.
+ * Reads are bounded by this horizon, never by lifetime history (INV-13).
+ */
+export async function getProjection(db: Db, actor: Actor, fromDate: string, days: number, now = new Date()): Promise<WeekView> {
+  const household = await householdFor(db, actor);
+  if (!household) throw new DomainError("NOT_FOUND", "You are not in a household yet.");
+  const tz = household.timeZone;
+  const weekKey = fromDate;
+  const dayList = Array.from({ length: days }, (_, i) => addDays(fromDate, i));
+  const horizon = { start: startOfLocalDate(fromDate, tz), end: startOfLocalDate(addDays(fromDate, days), tz) };
+  const viewer = actor.accountId;
+
+  const adults = await db
+    .select({ id: accounts.id, displayName: accounts.displayName })
+    .from(memberships)
+    .innerJoin(accounts, eq(accounts.id, memberships.accountId))
+    .where(and(eq(memberships.householdId, household.id), isNull(memberships.endsAt)))
+    .orderBy(memberships.startsAt);
+  const adultIds = adults.map((a) => a.id);
+  const kids = await db
+    .select({ id: children.id, preferredName: children.preferredName, ageBand: children.ageBand, needs: children.needs, version: children.version })
+    .from(children)
+    .where(and(eq(children.householdId, household.id), isNull(children.archivedAt)))
+    .orderBy(children.createdAt);
+  const [invite] = await db
+    .select({ id: invitations.id, expiresAt: invitations.expiresAt })
+    .from(invitations)
+    .where(and(eq(invitations.householdId, household.id), isNull(invitations.revokedAt), isNull(invitations.acceptedAt), gt(invitations.expiresAt, now)));
+
+  // ── Events (masked per viewer) ──
+  const occurrences = await loadEventOccurrences(db, household.id, horizon);
+  const eventsOut: WeekEvent[] = [];
+  for (const o of occurrences) {
+    const r = o.row;
+    const mine = r.ownerId === viewer;
+    if (r.visibility === "private" && !mine) continue;
+    const hidden = !canSeeDetails(r, viewer);
+    eventsOut.push({
+      kind: "event",
+      id: r.id,
+      recurrenceId: o.recurrenceId,
+      recurring: !!r.rule,
+      title: hidden ? "Busy" : r.title,
+      notes: hidden ? "" : r.notes,
+      location: hidden ? "" : r.location,
+      start: o.start,
+      end: o.end,
+      allDay: r.allDay,
+      adultIds: r.adultIds,
+      childIds: hidden ? [] : r.childIds,
+      ownerId: r.ownerId,
+      mine,
+      visibility: r.visibility,
+      detailsHidden: hidden,
+      travelBeforeMinutes: r.travelBeforeMinutes,
+      travelAfterMinutes: r.travelAfterMinutes,
+      version: r.version,
+      localStart: r.localStart,
+      durationMinutes: r.durationMinutes,
+      rule: hidden ? null : r.rule,
+    });
+  }
+
+  // ── Moments ──
+  const busy = await loadBusy(db, household.id, { start: horizon.start - 86_400_000, end: horizon.end + 86_400_000 });
+  const momentRows = await db
+    .select()
+    .from(moments)
+    .where(
+      and(
+        eq(moments.householdId, household.id),
+        lt(moments.startAt, new Date(horizon.end)),
+        gt(moments.endAt, new Date(horizon.start)),
+        or(eq(moments.sharing, "shared"), eq(moments.organiserId, viewer)),
+      ),
+    )
+    .orderBy(moments.startAt);
+  const momentIds = momentRows.map((m) => m.id);
+  const accRows = momentIds.length ? await db.select().from(acceptances).where(inArray(acceptances.momentId, momentIds)).orderBy(acceptances.createdAt) : [];
+  const taskRows = momentIds.length ? await db.select().from(preparationTasks).where(inArray(preparationTasks.momentId, momentIds)).orderBy(preparationTasks.createdAt) : [];
+  const myFeedback = momentIds.length
+    ? await db.select({ momentId: feedback.momentId }).from(feedback).where(and(eq(feedback.accountId, viewer), inArray(feedback.momentId, momentIds)))
+    : [];
+  const feedbackSet = new Set(myFeedback.map((f) => f.momentId));
+
+  // ── Care ──
+  const reqRows = await db
+    .select()
+    .from(careRequirements)
+    .where(and(eq(careRequirements.householdId, household.id), lt(careRequirements.startAt, new Date(horizon.end)), gt(careRequirements.endAt, new Date(horizon.start))));
+  const arrRows = await db
+    .select()
+    .from(careArrangements)
+    .where(and(eq(careArrangements.householdId, household.id), lt(careArrangements.startAt, new Date(horizon.end + 86_400_000)), gt(careArrangements.endAt, new Date(horizon.start - 86_400_000))));
+  const arrangements: CareArrangement[] = arrRows.map((a) => ({
+    id: a.id,
+    kind: a.kind,
+    responsibleAccountId: a.responsibleAccountId,
+    providerName: a.providerName,
+    childIds: a.childIds,
+    start: a.startAt.getTime(),
+    end: a.endAt.getTime(),
+    state: a.state,
+  }));
+  const arrangementView = (a: (typeof arrRows)[number]): ArrangementView => ({
+    id: a.id,
+    kind: a.kind,
+    responsibleAccountId: a.responsibleAccountId,
+    providerName: a.providerName,
+    childIds: a.childIds,
+    start: a.startAt.getTime(),
+    end: a.endAt.getTime(),
+    state: a.state,
+    version: a.version,
+    note: a.note,
+    awaitingMe: a.state === "proposed" && a.kind === "parent" && a.responsibleAccountId === viewer,
+  });
+  const parentBusy = new Map<string, Interval[]>();
+  for (const b of busy) {
+    if (b.sourceType === "care") continue;
+    const list = parentBusy.get(b.personId) ?? [];
+    list.push({ start: b.start - (b.travelBeforeMinutes ?? 0) * 60_000, end: b.end + (b.travelAfterMinutes ?? 0) * 60_000 });
+    parentBusy.set(b.personId, list);
+  }
+
+  type Req = { id: string; childId: string; start: number; end: number; reason: string };
+  const requirements: Req[] = reqRows
+    .filter((r) => kids.some((k) => k.id === r.childId))
+    .map((r) => ({ id: r.id, childId: r.childId, start: r.startAt.getTime(), end: r.endAt.getTime(), reason: r.reason }));
+
+  const momentsOut: MomentView[] = [];
+  for (const m of momentRows) {
+    const acc = accRows.filter((a) => a.momentId === m.id).map((a) => ({ actorId: a.actorId, materialVersion: a.materialVersion, decision: a.decision }));
+    const agreed = m.sharing === "shared" && isAgreed(m.participantIds, adultIds, m.materialVersion, acc);
+    const decisions: Record<string, Decision | null> = {};
+    for (const p of m.participantIds) decisions[p] = latestDecision(acc, p, m.materialVersion);
+
+    // Children not taking part need care for the whole occupied time (AT-04:
+    // computed from the current children, so a new child is never assumed covered).
+    let careState: MomentView["careState"] = "not_needed";
+    const occupiedStart = m.startAt.getTime() - m.travelBeforeMinutes * 60_000;
+    const occupiedEnd = m.endAt.getTime() + m.travelAfterMinutes * 60_000;
+    if (m.needsCare && m.lifecycle !== "cancelled") {
+      const states = kids
+        .filter((k) => !m.childIds.includes(k.id))
+        .map((k) => {
+          const req = { id: `moment:${m.id}:${k.id}`, childId: k.id, start: occupiedStart, end: occupiedEnd };
+          if (m.lifecycle !== "completed") requirements.push({ ...req, reason: m.surprise && m.organiserId !== viewer ? "Plan together" : m.title });
+          return coverageFor(req, arrangements, parentBusy).state;
+        });
+      careState = states.every((s) => s === "covered") ? "covered" : states.some((s) => s !== "unresolved") ? "partly_covered" : "unresolved";
+    }
+    const conflicts =
+      m.lifecycle === "cancelled" || m.lifecycle === "completed"
+        ? []
+        : findConflicts({ personIds: m.participantIds, start: occupiedStart, end: occupiedEnd, excludeSourceIds: [m.id] }, busy, viewer).map((c) => ({
+            personId: c.personId,
+            start: c.start,
+            end: c.end,
+            title: c.title,
+          }));
+    const tasks = taskRows.filter((t) => t.momentId === m.id);
+    const ready = readiness({
+      agreed,
+      careCovered: careState === "covered" || careState === "not_needed",
+      needsCare: m.needsCare,
+      openTasks: tasks.filter((t) => t.state === "open").length,
+      conflicts: conflicts.length,
+    });
+    const surpriseHidden = m.surprise && m.organiserId !== viewer && m.lifecycle !== "completed";
+    momentsOut.push({
+      kind: "moment",
+      id: m.id,
+      momentKind: m.kind,
+      title: surpriseHidden ? `A surprise from ${adults.find((a) => a.id === m.organiserId)?.displayName ?? "your partner"}` : m.title,
+      notes: surpriseHidden ? "" : m.notes,
+      location: surpriseHidden ? "" : m.location,
+      activityKey: surpriseHidden ? null : m.activityKey,
+      start: m.startAt.getTime(),
+      end: m.endAt.getTime(),
+      travelBeforeMinutes: m.travelBeforeMinutes,
+      travelAfterMinutes: m.travelAfterMinutes,
+      organiserId: m.organiserId,
+      participantIds: m.participantIds,
+      childIds: m.childIds,
+      needsCare: m.needsCare,
+      budgetMinor: m.budgetMinor,
+      surprise: m.surprise,
+      surpriseHidden,
+      lifecycle: m.lifecycle,
+      sharing: m.sharing,
+      materialVersion: m.materialVersion,
+      version: m.version,
+      review: m.review,
+      reviewReason: m.reviewReason,
+      agreed,
+      decisions,
+      myDecision: decisions[viewer] ?? null,
+      ready: ready.ready,
+      missing: ready.missing,
+      stage: stageLabel({ lifecycle: m.lifecycle, sharing: m.sharing, agreed, ready: ready.ready }),
+      careState,
+      conflicts,
+      tasks: tasks.map((t) => ({ id: t.id, title: t.title, ownerId: t.ownerId, state: t.state, version: t.version })),
+      myFeedbackSaved: feedbackSet.has(m.id),
+      expenseId: null,
+    });
+  }
+
+  // Coverage per child, grouped per day (spec 6.3: group children, split only real differences).
+  const careDays: CareDay[] = [];
+  for (const date of dayList) {
+    const reqs = requirements.filter((r) => instantToLocalDate(r.start, tz) === date);
+    if (!reqs.length) continue;
+    const byReason = new Map<string, Req[]>();
+    for (const r of reqs) byReason.set(`${r.reason}|${r.start}|${r.end}`, [...(byReason.get(`${r.reason}|${r.start}|${r.end}`) ?? []), r]);
+    const groups: CareDay["groups"] = [];
+    for (const list of byReason.values()) {
+      const cov = list.map((r) => coverageFor({ id: r.id, childId: r.childId, start: r.start, end: r.end }, arrangements, parentBusy));
+      for (const g of groupCoverage(cov)) {
+        const sample = cov.find((c) => c.childId === g.childIds[0])!;
+        groups.push({
+          childIds: g.childIds,
+          state: g.state,
+          reason: list[0].reason,
+          gaps: sample.gaps,
+          arrangements: arrRows.filter((a) => g.arrangementIds.includes(a.id)).map(arrangementView),
+        });
+      }
+    }
+    careDays.push({ date, groups });
+  }
+  const careAwaitingMe = arrRows.map(arrangementView).filter((a) => a.awaitingMe);
+
+  // ── Money: one row per real cost, on the activity-week basis ──
+  const expenseRows = await db
+    .select()
+    .from(expenses)
+    .where(and(eq(expenses.householdId, household.id), sql`${expenses.activityDate} >= ${weekKey}`, sql`${expenses.activityDate} < ${addDays(weekKey, days)}`));
+  const visibleMomentIds = new Set(momentsOut.map((m) => m.id));
+  const hiddenDraftIds = new Set(
+    expenseRows.filter((e) => e.sourceType === "moment" && e.sourceId && !visibleMomentIds.has(e.sourceId)).map((e) => e.sourceId!),
+  );
+  const txRows = expenseRows.length
+    ? await db.select().from(paymentTransactions).where(inArray(paymentTransactions.expenseId, expenseRows.map((e) => e.id)))
+    : [];
+  const expensesOut: ExpenseView[] = expenseRows
+    .filter((e) => !(e.sourceId && hiddenDraftIds.has(e.sourceId)))
+    .map((e) => ({
+      id: e.id,
+      label: e.sourceType === "moment" && momentsOut.find((m) => m.id === e.sourceId)?.surpriseHidden ? "Surprise plan" : e.label,
+      sourceType: e.sourceType,
+      sourceId: e.sourceId,
+      activityDate: e.activityDate,
+      version: e.version,
+      ...summarise(e, txRows.filter((t) => t.expenseId === e.id)),
+    }));
+  for (const m of momentsOut) m.expenseId = expensesOut.find((e) => e.sourceType === "moment" && e.sourceId === m.id)?.id ?? null;
+  const money = {
+    estimateMinor: expensesOut.reduce((s, e) => s + (e.estimateMinor ?? 0), 0),
+    committedMinor: expensesOut.reduce((s, e) => s + (e.committedMinor ?? 0), 0),
+    netPaidMinor: expensesOut.reduce((s, e) => s + e.netPaidMinor, 0),
+  };
+
+  // ── Notifications and check-in ──
+  const notes = await db
+    .select()
+    .from(notifications)
+    .where(eq(notifications.accountId, viewer))
+    .orderBy(desc(notifications.createdAt))
+    .limit(20);
+  const [checkin] = await db
+    .select({ id: checkins.id })
+    .from(checkins)
+    .where(and(eq(checkins.accountId, viewer), eq(checkins.weekKey, weekKeyFor(fromDate))));
+
+  const attention = buildAttention({ viewer, momentsOut, careDays, careAwaitingMe, kids, adults, now, tz, checkinDone: !!checkin, openInvite: !!invite });
+
+  return {
+    me: { id: viewer, displayName: adults.find((a) => a.id === viewer)?.displayName ?? actor.displayName },
+    household: {
+      id: household.id,
+      name: household.name,
+      timeZone: tz,
+      membershipRevision: household.membershipRevision,
+      scheduleRevision: household.scheduleRevision,
+      version: household.version,
+    },
+    adults,
+    children: kids,
+    openInvite: invite ? { id: invite.id, expiresAt: invite.expiresAt.toISOString() } : null,
+    weekKey,
+    days: dayList,
+    events: eventsOut,
+    moments: momentsOut,
+    care: careDays,
+    careAwaitingMe,
+    expenses: expensesOut,
+    money,
+    attention,
+    notifications: notes.map((n) => ({
+      id: n.id,
+      text: n.text,
+      createdAt: n.createdAt.toISOString(),
+      read: !!n.readAt,
+      sourceType: n.sourceType,
+      sourceId: n.sourceId,
+    })),
+    checkinDone: !!checkin,
+  };
+}
+
+function buildAttention(input: {
+  viewer: string;
+  momentsOut: MomentView[];
+  careDays: CareDay[];
+  careAwaitingMe: ArrangementView[];
+  kids: { id: string; preferredName: string }[];
+  adults: Person[];
+  now: Date;
+  tz: string;
+  checkinDone: boolean;
+  openInvite: boolean;
+}): AttentionItem[] {
+  const { viewer, now } = input;
+  const out: AttentionItem[] = [];
+  const names = (ids: string[]) => ids.map((id) => input.kids.find((k) => k.id === id)?.preferredName ?? "a child").join(", ");
+  const nowMs = now.getTime();
+
+  for (const m of input.momentsOut) {
+    const upcoming = m.end > nowMs && m.lifecycle === "planned";
+    if (upcoming && m.sharing === "shared" && m.participantIds.includes(viewer) && m.myDecision !== "accepted") {
+      out.push({ key: `respond:${m.id}:${m.materialVersion}`, priority: 1, text: `Answer “${m.title}”`, action: "respond", targetId: m.id });
+    }
+    if (m.review === "needs_review" && m.lifecycle !== "cancelled" && m.end > nowMs) {
+      out.push({ key: `review:${m.id}`, priority: 1, text: `Check “${m.title}”: ${m.reviewReason ?? "something changed"}`, action: "review", targetId: m.id });
+    }
+    if (upcoming) {
+      for (const t of m.tasks.filter((t) => t.ownerId === viewer && t.state === "open")) {
+        out.push({ key: `task:${t.id}`, priority: 2, text: `${t.title} (for “${m.title}”)`, action: "task", targetId: m.id });
+      }
+    }
+    if (m.lifecycle === "planned" && m.end <= nowMs && m.participantIds.includes(viewer)) {
+      out.push({ key: `complete:${m.id}`, priority: 3, text: `Did “${m.title}” happen?`, action: "complete", targetId: m.id });
+    }
+    if (m.lifecycle === "completed" && m.participantIds.includes(viewer) && !m.myFeedbackSaved) {
+      out.push({ key: `reflect:${m.id}`, priority: 4, text: `How was “${m.title}”? (only you see this)`, action: "reflect", targetId: m.id });
+    }
+  }
+  for (const a of input.careAwaitingMe) {
+    out.push({ key: `care:${a.id}`, priority: 1, text: `Can you look after ${names(a.childIds)}?`, action: "care", targetId: a.id });
+  }
+  for (const day of input.careDays) {
+    for (const g of day.groups) {
+      if (g.state !== "covered" && g.gaps.some((gap) => gap.end > nowMs)) {
+        out.push({ key: `gap:${day.date}:${g.childIds.join(",")}:${g.reason}`, priority: 2, text: `${names(g.childIds)} still needs care (${g.reason})`, action: "care-gap", date: day.date });
+      }
+    }
+  }
+  if (input.adults.length < 2 && !input.openInvite) {
+    out.push({ key: "invite", priority: 5, text: "Invite your partner when you're ready", action: "invite" });
+  }
+  if (!input.checkinDone) {
+    out.push({ key: "checkin", priority: 6, text: "Optional: a ten-second check-in for this week", action: "checkin" });
+  }
+  return out.sort((a, b) => a.priority - b.priority);
+}
+
+export type { Busy };

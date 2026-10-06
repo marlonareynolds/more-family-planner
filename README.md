@@ -1,36 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# More
 
-## Getting Started
+A shared planner for two adults raising a family: one week view, time for
+each adult and for the couple, family time, school-holiday childcare, and
+clear spending. Built from the *More Business Plan and Technical
+Specification*.
 
-First, run the development server:
+## Stack
+
+| Layer | Choice | Why |
+| --- | --- | --- |
+| App | Next.js 16 (App Router, React 19, TypeScript) on Vercel | One codebase for web and installable PWA; server components keep private data on the server |
+| Data | Postgres (Supabase, London) via Drizzle ORM | Exclusion constraints, transactions and row locks enforce the spec's invariants in the database |
+| Local/test DB | PGlite (embedded Postgres) | Real Postgres semantics with zero setup; every test runs on it |
+| Auth | Supabase Auth magic links; synthetic dev sign-in when unconfigured | No passwords to store |
+| Time | Temporal polyfill | DST gaps and overlaps handled explicitly in the household timezone |
+| Validation | Zod | One schema per command, shared by API and UI |
+| Tests | Vitest (domain + acceptance), Playwright + axe (journeys, accessibility) | |
+
+## Run it
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+pnpm dev            # http://localhost:3000, embedded database in .data/
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Sign in as "Alex", set up a household, then open Settings to make an
+invitation link and open it in a private window as "Sam".
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+pnpm test           # 47 domain and acceptance tests on embedded Postgres
+pnpm typecheck
+pnpm lint
+pnpm test:e2e       # two-adult journeys on phone and desktop, with axe
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+In a sandbox without Playwright's own browser, set `PW_CHROMIUM` to a Chromium binary.
 
-## Learn More
+## How it works
 
-To learn more about Next.js, take a look at the following resources:
+- **Commands, not CRUD.** Every change is a typed command posted to
+  `/api/v1/commands` with an idempotency key and the revisions the client
+  saw. The pipeline locks the household row, checks membership at commit,
+  rejects stale writes, writes an audit row and queues notifications in an
+  outbox in the same transaction (`src/server/pipeline.ts`).
+- **Database-enforced invariants.** One adult can't be booked twice
+  (`EXCLUDE USING gist` on reservations), positive durations, integer pence.
+- **Privacy by ownership.** Journal, check-ins, feedback and learned
+  preferences belong to the account, not the household: no partner, payer
+  or export of the household can reach them, and they survive leaving.
+- **Agreement is versioned.** Changing time, people, care or budget on a
+  shared plan bumps its material version; everyone must agree again.
+- **Notifications re-check before sending.** The outbox worker validates
+  that a reminder is still true before delivering it.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Deploy
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Create a Supabase project in London; run `pnpm db:migrate` with the direct `DATABASE_URL`.
+2. Import the repo in Vercel; set the variables in `.env.example`.
+3. The outbox cron in `vercel.json` runs daily, the Hobby plan limit.
+   On Pro, change it to every five minutes for timely reminders.
 
-## Deploy on Vercel
+## Not switched on yet
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- The AI concierge is off: no paid API calls until the founder approves.
+- Email and push delivery: notifications are stored in-app only; no
+  message is sent to anyone.
+- Row-level security policies: access is enforced in the server layer;
+  RLS is a planned second line of defence.
+- The activity catalogue is illustrative starter content and has not been
+  expert-reviewed.
+- End-to-end encryption is not offered and is not claimed.
