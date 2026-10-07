@@ -1,0 +1,7 @@
+.data
+test-results
+playwright-report
+.next
+.env*
+!.env.example
+backups

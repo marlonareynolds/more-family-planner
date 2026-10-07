@@ -1,0 +1,138 @@
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import type { Db } from "@/db/client";
+import { hiddenReason } from "@/domain/moments";
+import {
+  accounts,
+  careArrangements,
+  checkins,
+  trialResponses,
+  children,
+  events,
+  expenses,
+  feedback,
+  helpers,
+  jobs,
+  places,
+  highlights,
+  holidayPeriods,
+  journalEntries,
+  moments,
+  paymentTransactions,
+  preferences,
+  rituals,
+} from "@/db/schema";
+import { DomainError } from "@/domain/errors";
+import type { Actor } from "../auth";
+import { householdFor } from "./week";
+
+/**
+ * Exports obey the same permission rules as every other read (spec 8.12,
+ * AT-13): an account export holds only the owner's private records; a
+ * household export holds shared records plus the viewer's own private
+ * items, and never another adult's private or busy-only details.
+ */
+
+export async function exportAccount(db: Db, actor: Actor) {
+  const [account] = await db
+    .select({
+      displayName: accounts.displayName,
+      timeZone: accounts.timeZone,
+      email: accounts.email,
+      pushEnabled: accounts.pushEnabled,
+      weeklyEmail: accounts.weeklyEmail,
+      quietStart: accounts.quietStart,
+      quietEnd: accounts.quietEnd,
+      createdAt: accounts.createdAt,
+    })
+    .from(accounts)
+    .where(eq(accounts.id, actor.accountId));
+  return {
+    kind: "account",
+    exportedAt: new Date().toISOString(),
+    account,
+    journal: await db
+      .select({ entryDate: journalEntries.entryDate, title: journalEntries.title, body: journalEntries.body, tags: journalEntries.tags })
+      .from(journalEntries)
+      .where(and(eq(journalEntries.accountId, actor.accountId), isNull(journalEntries.deletedAt))),
+    checkins: await db.select().from(checkins).where(eq(checkins.accountId, actor.accountId)),
+    trialResponses: await db.select().from(trialResponses).where(eq(trialResponses.accountId, actor.accountId)),
+    reflections: await db.select().from(feedback).where(eq(feedback.accountId, actor.accountId)),
+    preferences: await db.select().from(preferences).where(eq(preferences.accountId, actor.accountId)),
+  };
+}
+
+export async function exportHousehold(db: Db, actor: Actor) {
+  const household = await householdFor(db, actor);
+  if (!household) throw new DomainError("NOT_FOUND", "You are not in a household.");
+  const viewer = actor.accountId;
+  const ev = await db
+    .select()
+    .from(events)
+    .where(and(eq(events.householdId, household.id), isNull(events.cancelledAt), or(eq(events.visibility, "shared"), eq(events.ownerId, viewer))));
+  const ms = await db
+    .select()
+    .from(moments)
+    .where(and(eq(moments.householdId, household.id), or(eq(moments.sharing, "shared"), eq(moments.organiserId, viewer))));
+  const ex = await db.select().from(expenses).where(eq(expenses.householdId, household.id));
+  const visibleMomentIds = new Set(ms.map((m) => m.id));
+  const hl = ms.length ? await db.select().from(highlights).where(inArray(highlights.momentId, ms.map((m) => m.id))) : [];
+  const names = new Map((await db.select({ id: accounts.id, name: accounts.displayName }).from(accounts).where(inArray(accounts.id, [...new Set(hl.map((h) => h.accountId))].concat(viewer)))).map((a) => [a.id, a.name]));
+  const visibleExpenses = ex.filter((e) => e.sourceType !== "moment" || !e.sourceId || visibleMomentIds.has(e.sourceId));
+  return {
+    kind: "household",
+    exportedAt: new Date().toISOString(),
+    household: { name: household.name, timeZone: household.timeZone, currency: household.currency },
+    children: await db
+      .select({ preferredName: children.preferredName, ageBand: children.ageBand, needs: children.needs })
+      .from(children)
+      .where(eq(children.householdId, household.id)),
+    events: ev.map((e) => ({
+      title: e.title,
+      notes: e.notes,
+      location: e.location,
+      allDay: e.allDay,
+      start: e.startAt,
+      end: e.endAt,
+      timeZone: e.timeZone,
+      rule: e.rule,
+      visibility: e.visibility,
+    })),
+    moments: ms.map((m) => ({
+      kind: m.kind,
+      title: hiddenReason(m, viewer) === "me_time" ? "Time for themselves" : hiddenReason(m, viewer) ? "Surprise" : m.title,
+      start: m.startAt,
+      end: m.endAt,
+      lifecycle: m.lifecycle,
+      budgetMinor: m.budgetMinor,
+      // The family's memories: shared highlights from plans this adult was part of.
+      highlights:
+        !hiddenReason(m, viewer) && (m.participantIds.includes(viewer) || m.kind === "family")
+          ? hl.filter((h) => h.momentId === m.id).map((h) => ({ by: names.get(h.accountId) ?? "Someone", text: h.text, at: h.createdAt }))
+          : [],
+    })),
+    rituals: (await db.select().from(rituals).where(eq(rituals.householdId, household.id))).map((r) => ({
+      kind: r.kind,
+      title: r.kind === "me" && r.organiserId !== viewer ? "Time for themselves" : r.title,
+      cadence: r.cadence,
+      startsOn: r.startsOn,
+      startTime: r.startTime,
+      durationMinutes: r.durationMinutes,
+      ended: r.endedAt,
+    })),
+    helpers: await db.select({ name: helpers.name, relation: helpers.relation, phone: helpers.phone }).from(helpers).where(and(eq(helpers.householdId, household.id), isNull(helpers.archivedAt))),
+    jobs: await db
+      .select({ title: jobs.title, notes: jobs.notes, cadence: jobs.cadence, startsOn: jobs.startsOn, ownerId: jobs.ownerId })
+      .from(jobs)
+      .where(and(eq(jobs.householdId, household.id), isNull(jobs.archivedAt))),
+    places: await db
+      .select({ name: places.name, area: places.area, kinds: places.kinds, notes: places.notes, typicalCostMinor: places.typicalCostMinor })
+      .from(places)
+      .where(and(eq(places.householdId, household.id), isNull(places.archivedAt))),
+    holidays: await db.select().from(holidayPeriods).where(eq(holidayPeriods.householdId, household.id)),
+    care: await db.select().from(careArrangements).where(eq(careArrangements.householdId, household.id)),
+    expenses: visibleExpenses,
+    payments: visibleExpenses.length
+      ? await db.select().from(paymentTransactions).where(inArray(paymentTransactions.expenseId, visibleExpenses.map((e) => e.id)))
+      : [],
+  };
+}

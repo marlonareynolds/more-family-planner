@@ -1,26 +1,220 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* "Kitchen-table almanac": warm paper, printed ink, a few honest colours. */
+  --bg: #f3eee4;
+  --surface: #fbf8f2;
+  --surface-2: #ebe4d6;
+  --ink: #1d2433;
+  --ink-2: #474d5d;
+  --ink-3: #5c6170;
+  --line: #d9cfbd;
+  --brand: #23345c;
+  --brand-ink: #fbf8f2;
+  --brand-soft: #e2e5ec;
+  --accent: #d9542f;
+  --me: #6d3f73;
+  --me-soft: #efe2ee;
+  --us: #a9402a;
+  --us-soft: #f6e0d7;
+  --family: #7c5600;
+  --family-soft: #f3e6c4;
+  --care: #1f6767;
+  --care-soft: #d9eae7;
+  --good: #2f6b3a;
+  --warn: #855000;
+  --bad: #b3261e;
+  --focus: #d9542f;
+  --shadow-color: 29 36 51;
+  --hero-a: #23345c;
+  --hero-b: #2c4274;
+  --grain-opacity: 0.5;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg: #15171d;
+    --surface: #1d2029;
+    --surface-2: #262a35;
+    --ink: #f0ece4;
+    --ink-2: #c8c4bc;
+    --ink-3: #a5a29b;
+    --line: #363a48;
+    --brand: #a9bde9;
+    --brand-ink: #111a30;
+    --brand-soft: #232d46;
+    --accent: #f08262;
+    --me: #d9aedd;
+    --me-soft: #33253a;
+    --us: #f29a83;
+    --us-soft: #3d2620;
+    --family: #e8c468;
+    --family-soft: #3a301a;
+    --care: #7ccac6;
+    --care-soft: #1a3433;
+    --good: #85cf97;
+    --warn: #e8b553;
+    --bad: #ff8a80;
+    --focus: #f08262;
+    --shadow-color: 0 0 0;
+    --hero-a: #1b2744;
+    --hero-b: #22325a;
+    --grain-opacity: 0.25;
   }
 }
 
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-soft: var(--brand-soft);
+  --color-me: var(--me);
+  --color-me-soft: var(--me-soft);
+  --color-us: var(--us);
+  --color-us-soft: var(--us-soft);
+  --color-family: var(--family);
+  --color-family-soft: var(--family-soft);
+  --color-care: var(--care);
+  --color-care-soft: var(--care-soft);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-sans-face), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display-face), Georgia, serif;
+  --font-menu: var(--font-menu-face), "Cormorant Garamond", Georgia, serif;
+  --font-script: var(--font-script-face), cursive;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* Paper: a fine printed grain over everything, never over text contrast. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.45 0 0 0 0 0.38 0 0 0 0 0.28 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@media (prefers-color-scheme: dark) {
+  body::before { mix-blend-mode: screen; }
+}
+
+h1, h2, h3, .font-display { font-optical-sizing: auto; letter-spacing: -0.01em; }
+
+/* Small capitals for labels and dates, like a printed diary. */
+.label-caps {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+dialog::backdrop {
+  background: rgb(20 18 15 / 0.45);
+  backdrop-filter: blur(3px);
+}
+
+dialog[open] {
+  animation: sheet-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes sheet-in {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+/* Gentle entrance for page sections; --i staggers siblings. */
+.rise {
+  animation: rise 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+@keyframes rise {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+.pop {
+  animation: pop 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes toast-in {
+  from { transform: translateY(16px) scale(0.98); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes confetti {
+  0% { transform: translate(0, 0) rotate(0); opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) rotate(var(--r)); opacity: 0; }
+}
+
+/* Printed, not floating: a crisp offset like a card laid on the table. */
+.shadow-soft {
+  box-shadow: 0 1px 0 rgb(var(--shadow-color) / 0.05), 2px 3px 0 rgb(var(--shadow-color) / 0.06);
+}
+
+.shadow-lift {
+  box-shadow: 0 1px 0 rgb(var(--shadow-color) / 0.06), 4px 5px 0 rgb(var(--shadow-color) / 0.09);
+}
+
+/* The perforated edge of a ticket stub. */
+.perforated {
+  background-image: radial-gradient(circle at 50% 50%, var(--bg) 4px, transparent 4.5px);
+  background-size: 14px 14px;
+  background-repeat: repeat-x;
+}
+
+/* Native selects, styled to match the rest of the controls. */
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%235c6170' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  padding-right: 2.25rem !important;
+}
+
+input[type="radio"], input[type="checkbox"] {
+  accent-color: var(--brand);
+}
+
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
