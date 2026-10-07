@@ -109,7 +109,11 @@ describe("Small kindnesses on For Us", () => {
     expect([...alexKeys].filter((k) => samKeys.has(k))).toEqual([]);
     const samShelf = myShare(KINDNESSES, (k) => k.key, { householdId: w.householdId, accountId: w.sam.accountId, adultIds: [w.alex.accountId, w.sam.accountId] }, (k) => KINDNESSES.indexOf(k)).map((k) => k.key);
     expect([...samKeys].every((k) => samShelf.includes(k))).toBe(true);
-    expect((await card(w, w.sam))!.items[0].text).toContain("Alex");
+    // Not every kindness names the partner, so check across the weeks: names are filled in, never a placeholder.
+    const texts: string[] = [];
+    for (let i = 0; i < 30; i++) texts.push(...(await card(w, w.sam, new Date(Date.now() + i * 7 * DAY)))!.items.map((k) => k.text));
+    expect(texts.some((t) => t.includes("Alex"))).toBe(true);
+    expect(texts.some((t) => t.includes("{name}"))).toBe(false);
   });
 
   it("'I did this' stays ticked privately; 'Another' brings a different one", async () => {
