@@ -19,7 +19,7 @@ export const noStore = { "Cache-Control": "no-store" };
  * Cross-site request protection for state-changing routes: the request must
  * be JSON and come from this site's own origin.
  */
-export function assertSameOrigin(req: Request): void {
+export function assertSameOrigin(req: Request, maxBytes = 64_000): void {
   const origin = req.headers.get("origin");
   const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
   if (!origin || !host || new URL(origin).host !== host) {
@@ -29,5 +29,5 @@ export function assertSameOrigin(req: Request): void {
     throw new DomainError("VALIDATION", "Requests must be JSON.");
   }
   const length = Number(req.headers.get("content-length") ?? "0");
-  if (length > 64_000) throw new DomainError("VALIDATION", "That request is too large.");
+  if (length > maxBytes) throw new DomainError("VALIDATION", "That request is too large.");
 }

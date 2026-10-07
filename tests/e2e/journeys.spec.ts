@@ -276,3 +276,46 @@ test("what would help stays private, and the partner gets small kindnesses", asy
   await expect(sam.getByRole("button", { name: "Done" })).toBeVisible();
   await sam.screenshot({ path: `test-results/kindness-${info.project.name}.png`, fullPage: true });
 });
+
+test("the household desk reads a pasted letter on the phone and adds only what's ticked", async ({ browser }, info) => {
+  const tag = `${info.project.name}-d${Date.now().toString(36)}`;
+  const vp = info.project.name === "phone" ? { width: 412, height: 915 } : undefined;
+  const alex = await adult(browser, `Alex ${tag}`, vp);
+  await alex.getByLabel("Household name").fill(`Household ${tag}`);
+  await alex.getByRole("button", { name: "Start our household" }).click();
+  await alex.waitForURL(/\/welcome/);
+  await alex.getByLabel("Child 1 name").fill("Robin");
+  await alex.getByRole("button", { name: "Save and continue" }).click();
+  await expect(alex.getByRole("heading", { name: "School holidays" })).toBeVisible();
+
+  // The letter itself never leaves the browser: only the chosen items are sent.
+  const sent: string[] = [];
+  alex.on("request", (r) => {
+    const body = r.postData();
+    if (body) sent.push(body);
+  });
+  const uk = (d: string) => d.split("-").reverse().join("/");
+  await go(alex, "/desk");
+  await axe(alex);
+  await alex.getByLabel("Letter, email or booking").fill(
+    [
+      "From: School office <office@school.example>",
+      "Dear parents,",
+      `Half term is from ${uk(inDays(20))} to ${uk(inDays(24))}.`,
+      `Parents' evening: ${uk(inDays(10))}, 3.30pm - 6pm. Robin's teacher will be there.`,
+      `Cake sale ${uk(inDays(12))}.`,
+    ].join("\n"),
+  );
+  await alex.getByRole("button", { name: "Read it" }).click();
+  await expect(alex.getByRole("heading", { name: "Found 3 things" })).toBeVisible();
+  await axe(alex);
+  // Leave the cake sale out.
+  await alex.getByRole("listitem").filter({ hasText: "Cake sale" }).getByLabel("Add this").uncheck();
+  await alex.getByRole("button", { name: "Add 2 things" }).click();
+  await expect(alex.getByText("Added: Parents' evening")).toBeVisible();
+  await expect(alex.getByText("Added: Half term")).toBeVisible();
+  expect(sent.some((b) => b.includes("Robin's teacher") || b.includes("office@school.example") || b.includes("Cake sale"))).toBe(false);
+
+  await go(alex, "/holidays");
+  await expect(alex.getByText("Half term", { exact: true })).toBeVisible();
+});
