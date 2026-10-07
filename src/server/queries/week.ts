@@ -641,17 +641,21 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
 
 /**
  * Yearly all-day dates (birthdays, anniversaries) coming up in the next two
- * weeks that this viewer can see, unless a plan already exists that day
- * (spec 8.2: recurring important dates).
+ * weeks that this viewer can see, unless a plan they know of already exists
+ * that day (spec 8.2: recurring important dates). A private hint, only for an
+ * adult who turned it on: partners are never nudged together, and one
+ * partner's private draft never changes what the other is shown.
  */
 async function importantDatesAhead(db: Db, householdId: string, viewer: string, now: Date, tz: string) {
+  const [me] = await db.select({ dateHints: accounts.dateHints }).from(accounts).where(eq(accounts.id, viewer));
+  if (!me?.dateHints) return [];
   const start = startOfLocalDate(instantToLocalDate(now.getTime(), tz), tz);
   const horizon = { start, end: start + 15 * 86_400_000 };
   const occ = await loadEventOccurrences(db, householdId, horizon);
   const planned = await db
     .select({ startAt: moments.startAt })
     .from(moments)
-    .where(and(eq(moments.householdId, householdId), gt(moments.endAt, new Date(horizon.start)), lt(moments.startAt, new Date(horizon.end)), sql`${moments.lifecycle} <> 'cancelled'`, sql`${moments.kind} <> 'me'`));
+    .where(and(eq(moments.householdId, householdId), gt(moments.endAt, new Date(horizon.start)), lt(moments.startAt, new Date(horizon.end)), sql`${moments.lifecycle} <> 'cancelled'`, sql`${moments.kind} <> 'me'`, sql`(${moments.organiserId} = ${viewer} or ${moments.sharing} = 'shared')`));
   const plannedDays = new Set(planned.map((m) => instantToLocalDate(m.startAt.getTime(), tz)));
   const today = instantToLocalDate(now.getTime(), tz);
   const out: { id: string; title: string; date: string; days: number }[] = [];
@@ -738,7 +742,7 @@ function buildAttention(input: {
   }
   for (const d of input.datesAhead) {
     const when = d.days === 0 ? "is today" : d.days === 1 ? "is tomorrow" : `is in ${d.days} days`;
-    out.push({ key: `date:${d.id}:${d.date}`, priority: 3, text: `“${d.title}” ${when}. Want to plan something?`, action: "date-ahead", targetId: d.id, date: d.date });
+    out.push({ key: `date:${d.id}:${d.date}`, priority: 3, text: `“${d.title}” ${when}. Only you get this reminder.`, action: "date-ahead", targetId: d.id, date: d.date });
   }
   if (input.adults.length < 2 && !input.openInvite) {
     out.push({ key: "invite", priority: 5, text: "Invite your partner when you're ready", action: "invite" });

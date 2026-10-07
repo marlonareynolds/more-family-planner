@@ -40,6 +40,7 @@ export async function exportAccount(db: Db, actor: Actor) {
       email: accounts.email,
       pushEnabled: accounts.pushEnabled,
       weeklyEmail: accounts.weeklyEmail,
+      dateHints: accounts.dateHints,
       quietStart: accounts.quietStart,
       quietEnd: accounts.quietEnd,
       createdAt: accounts.createdAt,

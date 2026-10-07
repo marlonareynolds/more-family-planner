@@ -1,0 +1,1 @@
+ALTER TABLE "accounts" ADD COLUMN "date_hints" boolean DEFAULT false NOT NULL;

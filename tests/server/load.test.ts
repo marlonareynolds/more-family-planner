@@ -78,11 +78,30 @@ describe("our places", () => {
   it("come first in picks and carry their location into the plan", async () => {
     const w = await newWorld();
     await w.run(w.alex, "AddPlace", { name: "The Boathouse", area: "Guildford", kinds: ["us"], category: "food", setting: "out-indoors", typicalCostMinor: 4000, durationMinutes: 120 });
-    const picks = await picksFor(w.db, w.alex, "us", new Date("2030-10-06T12:00:00Z"), { count: 3 });
-    const mine = picks.picks.find((p) => p.activity.local);
-    expect(mine?.activity).toMatchObject({ title: "The Boathouse", location: "The Boathouse, Guildford" });
+    // For Us ideas are private, so the place is on exactly one partner's shelf.
+    const at = new Date("2030-10-06T12:00:00Z");
+    const found = await Promise.all([w.alex, w.sam].map(async (who) => (await picksFor(w.db, who, "us", at, { count: 3 })).picks.find((p) => p.activity.local)));
+    expect(found.filter(Boolean)).toHaveLength(1);
+    expect(found.find(Boolean)?.activity).toMatchObject({ title: "The Boathouse", location: "The Boathouse, Guildford" });
     expect((await w.week(w.sam, "2030-10-07")).places.map((p) => p.name)).toEqual(["The Boathouse"]);
     await expectCode(w.run(w.alex, "AddPlace", { name: "Nowhere", kinds: [], category: "food", setting: "home" }), "VALIDATION");
+  });
+});
+
+describe("For Us picks are private to each partner", () => {
+  it("never shows both partners the same idea, week after week", async () => {
+    const w = await newWorld();
+    for (const day of ["2030-10-06", "2030-10-13", "2030-10-20"]) {
+      const at = new Date(`${day}T12:00:00Z`);
+      const keys = async (who: typeof w.alex) => (await picksFor(w.db, who, "us", at, { count: 3 })).picks.map((p) => p.activity.key);
+      const [alex, sam] = [await keys(w.alex), await keys(w.sam)];
+      expect(alex.length).toBeGreaterThan(0);
+      expect(alex.filter((k) => sam.includes(k))).toEqual([]);
+    }
+    // Family picks stay shared.
+    const at = new Date("2030-10-06T12:00:00Z");
+    const fam = async (who: typeof w.alex) => (await picksFor(w.db, who, "family", at, { count: 3 })).picks.map((p) => p.activity.key);
+    expect(await fam(w.alex)).toEqual(await fam(w.sam));
   });
 });
 

@@ -9,9 +9,10 @@ import { PeoplePicker } from "./people-picker";
 import { Badge, Button, Card, Checkbox, Dialog, ErrorNote, Field, SectionTitle, inputClass } from "./ui";
 import { useCommand } from "./use-command";
 
-const IDEAS: Record<MomentKind, string> = {
+// No examples for For Us: the app doesn't propose a romance schedule.
+const IDEAS: Record<MomentKind, string | null> = {
   me: "Saturday swim, Thursday evening class",
-  us: "Fortnightly date night, Sunday morning coffee",
+  us: null,
   family: "Friday pizza, a monthly hour with each child",
 };
 
@@ -23,7 +24,7 @@ export function RitualsSection({ kind, rituals }: { kind: MomentKind; rituals: R
     <section>
       <SectionTitle action={<Button size="sm" onClick={() => setCreating(true)}>+ Start a ritual</Button>}>Rituals</SectionTitle>
       {mine.length === 0 ? (
-        <p className="text-sm text-ink-2">Something you do every week or month, like {IDEAS[kind]}. More puts the next few dates in the diary and checks childcare for each.</p>
+        <p className="text-sm text-ink-2">{IDEAS[kind] ? `Something you do every week or month, like ${IDEAS[kind]}.` : "Something the two of you already do and want to protect."} More puts the next few dates in the diary and checks childcare for each.</p>
       ) : (
         <ul className="flex flex-col gap-3">{mine.map((r) => <li key={r.id}><RitualCard ritual={r} /></li>)}</ul>
       )}
@@ -69,7 +70,7 @@ export function RitualEditor({ kind, onClose, preset }: { kind: MomentKind; onCl
   const app = useApp();
   const { run, pending, error } = useCommand(app.householdId);
   const [title, setTitle] = useState(preset?.title ?? "");
-  const [cadence, setCadence] = useState<"weekly" | "fortnightly" | "monthly">(kind === "us" ? "fortnightly" : "weekly");
+  const [cadence, setCadence] = useState<"weekly" | "fortnightly" | "monthly">("weekly");
   const [startsOn, setStartsOn] = useState(addDaysStr(todayIn(app.timeZone), 1));
   const [startTime, setStartTime] = useState(preset?.startTime ?? (kind === "us" ? "19:30" : kind === "me" ? "10:00" : "17:30"));
   const [hours, setHours] = useState(String((preset?.durationMinutes ?? (kind === "us" ? 150 : 90)) / 60));
@@ -100,7 +101,7 @@ export function RitualEditor({ kind, onClose, preset }: { kind: MomentKind; onCl
       footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" disabled={pending || !title.trim()} onClick={save}>{others.length ? `Suggest to ${others.map(app.nameOf).join(" and ")}` : "Start"}</Button></>}
     >
       <div className="flex flex-col gap-3">
-        <Field label="What">{(id) => <input id={id} className={inputClass} maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={IDEAS[kind].split(",")[0]} />}</Field>
+        <Field label="What">{(id) => <input id={id} className={inputClass} maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={IDEAS[kind]?.split(",")[0]} />}</Field>
         <Field label="How often">
           {(id) => (
             <select id={id} className={inputClass} value={cadence} onChange={(e) => setCadence(e.target.value as typeof cadence)}>

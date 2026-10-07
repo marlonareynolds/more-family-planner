@@ -22,7 +22,7 @@ type DeviceState = "checking" | "unsupported" | "needs-install" | "off" | "on" |
 export function ReachSettingsPanel({ settings }: { settings: ReachSettings }) {
   const { run, pending, error, setError } = useCommand();
   const [device, setDevice] = useState<DeviceState>("checking");
-  const [form, setForm] = useState({ pushEnabled: settings.pushEnabled, weeklyEmail: settings.weeklyEmail, quietStart: settings.quietStart, quietEnd: settings.quietEnd });
+  const [form, setForm] = useState({ pushEnabled: settings.pushEnabled, weeklyEmail: settings.weeklyEmail, quietStart: settings.quietStart, quietEnd: settings.quietEnd, dateHints: settings.dateHints });
   const [saved, setSaved] = useState(false);
   const [tested, setTested] = useState(false);
 
@@ -111,6 +111,12 @@ export function ReachSettingsPanel({ settings }: { settings: ReachSettings }) {
             onChange={(v) => { setForm({ ...form, weeklyEmail: v }); setSaved(false); }}
             label="Email me “your week ahead” on Sunday evenings"
             hint={settings.email ? `To ${settings.email}.${settings.emailReady ? "" : " Email isn't switched on for More yet."}` : "We don't have an email address for you yet."}
+          />
+          <Checkbox
+            checked={form.dateHints}
+            onChange={(v) => { setForm({ ...form, dateHints: v }); setSaved(false); }}
+            label="Remind me about birthdays and anniversaries two weeks ahead"
+            hint="Just for you. Your partner isn't told, and gets no reminder unless they turn it on too."
           />
           <ErrorNote message={error?.message} />
           <div className="flex items-center gap-3">

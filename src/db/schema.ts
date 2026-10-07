@@ -47,6 +47,8 @@ export const accounts = pgTable("accounts", {
   /** Local times between which nothing is pushed (spec 13.2). */
   quietStart: text("quiet_start").notNull().default("21:00"),
   quietEnd: text("quiet_end").notNull().default("07:00"),
+  /** Private heads-up about birthdays and anniversaries. Off unless this adult asks. */
+  dateHints: boolean("date_hints").notNull().default(false),
   version: version(),
 });
 

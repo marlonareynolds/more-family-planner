@@ -113,11 +113,13 @@ export function DateNightConcierge() {
   const [needsSitter, setNeedsSitter] = useState(true);
   const partner = app.partner;
   const hasChildren = app.children.length > 0;
-  const seed = `${app.householdId}:${mondayOf(todayIn(app.timeZone))}`;
+  // Each partner composes from their own shelf, never the other's.
+  const seed = `${app.householdId}:${app.me.id}:${mondayOf(todayIn(app.timeZone))}`;
+  const shelf = useMemo(() => ({ householdId: app.householdId, accountId: app.me.id, adultIds: app.adults.map((a) => a.id) }), [app.householdId, app.me.id, app.adults]);
 
   const composed = useMemo(
-    () => (mood ? composeMenu({ mood, budget, seed, turns, places: app.places }) : null),
-    [mood, budget, seed, turns, app.places],
+    () => (mood ? composeMenu({ mood, budget, seed, turns, places: app.places, shelf }) : null),
+    [mood, budget, seed, turns, app.places, shelf],
   );
   const menu: Menu | null = composed ? { ...composed, ...edits } : null;
 
@@ -299,6 +301,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         <p className="mt-6 text-[0.8rem] font-semibold uppercase tracking-[0.3em]">Your concierge</p>
         <h1 className="font-script text-[3.6rem] leading-[1.05]">Date night</h1>
         <p className="mt-1 text-[1.3rem] italic leading-snug">An evening for the two of you, composed like a menu and sent as an invitation.</p>
+        <p className="mt-2 text-[1.02rem]">These suggestions are yours alone. Your partner&apos;s concierge never offers them the same courses, so what you send is from you.</p>
         {children}
       </div>
     </div>

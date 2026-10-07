@@ -10,6 +10,7 @@ export interface ReachSettings {
   weeklyEmail: boolean;
   quietStart: string;
   quietEnd: string;
+  dateHints: boolean;
   email: string | null;
   devices: number;
   vapidPublicKey: string | null;
@@ -25,6 +26,7 @@ export async function reachFor(db: Db, actor: Actor): Promise<ReachSettings> {
     weeklyEmail: a.weeklyEmail,
     quietStart: a.quietStart,
     quietEnd: a.quietEnd,
+    dateHints: a.dateHints,
     email: a.email,
     devices,
     vapidPublicKey: vapidPublicKey(),

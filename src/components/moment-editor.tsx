@@ -57,7 +57,11 @@ export function MomentEditor({
   };
 
   const [title, setTitle] = useState(moment?.title ?? template?.title ?? "");
-  const [notes, setNotes] = useState(moment?.notes ?? template?.notes ?? "");
+  // For Us, what reaches your partner is in your words, never the app's: a
+  // new plan starts with a blank note and the idea stays on your side.
+  const ownWords = kind === "us" && !moment;
+  const idea = ownWords ? template?.notes?.trim() ?? "" : "";
+  const [notes, setNotes] = useState(moment?.notes ?? (ownWords ? "" : template?.notes) ?? "");
   const [location, setLocation] = useState(moment?.location ?? template?.location ?? "");
   const [span, setSpan] = useState<SpanValue>(moment ? spanFrom(moment.start, moment.end, app.timeZone) : (template?.slot ? { ...defaultSpan(template.slot.date, template.slot.startTime, template.slot.endTime), endDate: template.slot.endDate } : defaultSpan(defaultDate, startTime, endFromTemplate())));
   const [people, setPeople] = useState({
@@ -142,7 +146,13 @@ export function MomentEditor({
         </div>
         <Field label="Spending limit (£)" hint="Optional. Agreed together for shared plans.">{(id, d) => <input id={id} aria-describedby={d} inputMode="decimal" className={inputClass} value={budget} onChange={(e) => setBudget(e.target.value)} />}</Field>
         <Field label="Where">{(id) => <input id={id} className={inputClass} value={location} onChange={(e) => setLocation(e.target.value)} />}</Field>
-        <Field label="Notes">{(id) => <textarea id={id} rows={3} className={`${inputClass} py-2`} value={notes} onChange={(e) => setNotes(e.target.value)} />}</Field>
+        {ownWords ? (
+          <Field label="A line from you" hint={idea ? `Only you see the idea: ${idea}` : "Optional. Your partner reads it with the invitation."}>
+            {(id, d) => <textarea id={id} aria-describedby={d} rows={2} className={`${inputClass} py-2`} value={notes} placeholder="Say it how you'd say it" onChange={(e) => setNotes(e.target.value)} />}
+          </Field>
+        ) : (
+          <Field label="Notes">{(id) => <textarea id={id} rows={3} className={`${inputClass} py-2`} value={notes} onChange={(e) => setNotes(e.target.value)} />}</Field>
+        )}
         {kind === "us" && (
           <Checkbox checked={surprise} onChange={setSurprise} label="Keep the details a surprise" hint="Your partner still sees the time, the childcare and the spending limit before agreeing." />
         )}
