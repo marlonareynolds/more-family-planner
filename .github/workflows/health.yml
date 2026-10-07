@@ -1,0 +1,35 @@
+name: Health check
+# Every hour, asks the live app whether the scheduler ran recently, whether
+# work is piling up and whether reminders are failing. When anything needs
+# attention this run fails, and GitHub emails the repository owner.
+# Counts only, never anyone's content. Uses the same MORE_APP_URL and
+# CRON_SECRET repository secrets as the reminders workflow.
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      MORE_APP_URL: ${{ secrets.MORE_APP_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - name: Check
+        run: |
+          if [ -z "$MORE_APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::notice::Add MORE_APP_URL and CRON_SECRET repository secrets to switch on health alerts."
+            exit 0
+          fi
+          code=$(curl -sS --max-time 30 -o health.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "${MORE_APP_URL%/}/api/v1/health" || echo 000)
+          echo "### More health ($code)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -s health.json ] && jq -e .checks health.json >/dev/null 2>&1; then
+            jq -r '.checks[] | "- \(if .ok then "✅" else "❌" end) \(.name): \(.detail)"' health.json | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$code" != "200" ]; then
+            echo "::error::More needs attention (HTTP $code). See the summary."
+            exit 1
+          fi

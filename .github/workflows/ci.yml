@@ -6,6 +6,17 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # A real Postgres server for the multi-session race tests (tests/pg).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: more_race
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PG_RACE_URL: postgres://postgres:postgres@localhost:5432/more_race
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -16,6 +27,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
+      - run: DATABASE_URL=$PG_RACE_URL pnpm db:migrate
       - run: pnpm test
       - run: pnpm build
   e2e:

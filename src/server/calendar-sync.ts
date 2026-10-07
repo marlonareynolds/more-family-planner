@@ -147,7 +147,7 @@ export async function syncFeed(db: Db, feedId: string, fetchText: FetchText = fe
       occurrences = parseIcs(await fetchText(feed.url), window, household.timeZone);
     } else {
       if (!feed.credentials) return fail("reconnect");
-      const fresh = await freshTokens(feed.provider, JSON.parse(unseal(feed.credentials)) as Tokens, http, now.getTime());
+      const fresh = await freshTokens(feed.provider, openTokens(feed.credentials), http, now.getTime());
       if (fresh.changed) await db.update(calendarFeeds).set({ credentials: seal(JSON.stringify(fresh.tokens)) }).where(eq(calendarFeeds.id, feed.id));
       access = { provider: feed.provider, token: fresh.tokens.access };
       occurrences = await listBusy(feed.provider, access.token, window, household.timeZone, http);
@@ -238,10 +238,16 @@ export async function writeBusy(db: Db, feed: typeof calendarFeeds.$inferSelect,
     const prior = pushed.find((x) => x.sourceKey === sourceKey);
     if (prior?.fingerprint === fingerprint) continue;
     const externalId = await putBusy(access.provider, access.token, prior?.externalId ?? null, block, http);
-    await db
-      .insert(calendarPushes)
-      .values({ feedId: feed.id, sourceKey, externalId, fingerprint, updatedAt: now })
-      .onConflictDoUpdate({ target: [calendarPushes.feedId, calendarPushes.sourceKey], set: { externalId, fingerprint, updatedAt: now } });
+    try {
+      await db
+        .insert(calendarPushes)
+        .values({ feedId: feed.id, sourceKey, externalId, fingerprint, updatedAt: now })
+        .onConflictDoUpdate({ target: [calendarPushes.feedId, calendarPushes.sourceKey], set: { externalId, fingerprint, updatedAt: now } });
+    } catch (err) {
+      // Disconnected while this block was being written (BR-14): take it straight back out.
+      await deleteBusy(access.provider, access.token, externalId, http).catch(() => {});
+      throw err;
+    }
     written++;
   }
   // Plans that ended early, were cancelled or moved out of reach: take the block away.
@@ -253,16 +259,59 @@ export async function writeBusy(db: Db, feed: typeof calendarFeeds.$inferSelect,
   return { written, removed };
 }
 
-/** Before disconnecting: take every block More wrote back out of the calendar. */
-export async function clearPushedBusy(db: Db, feedId: string, http: HttpFetch = fetch, now = new Date()): Promise<void> {
+export interface ClearResult {
+  /** Blocks taken out of the calendar. */
+  removed: number;
+  /** Blocks that may still be there, with their times, for the person to delete by hand. */
+  left: { start: number; end: number }[];
+  /** Why they're left: the grant is gone, or the provider didn't answer. */
+  reason: "permission" | "provider" | null;
+}
+
+/**
+ * Before disconnecting: take every block More wrote back out of the
+ * calendar (R09). A block whose deletion fails keeps its record and is
+ * reported, with its time, rather than counted as removed. A block already
+ * deleted at the provider counts as removed. Nothing here stops the person
+ * disconnecting.
+ */
+export async function clearPushedBusy(db: Db, feedId: string, http: HttpFetch = fetch, now = new Date()): Promise<ClearResult> {
+  const result: ClearResult = { removed: 0, left: [], reason: null };
   const [feed] = await db.select().from(calendarFeeds).where(eq(calendarFeeds.id, feedId));
-  if (!feed || feed.provider === "ics" || !feed.credentials) return;
+  if (!feed || feed.provider === "ics") return result;
   const pushed = await db.select().from(calendarPushes).where(eq(calendarPushes.feedId, feed.id));
-  if (!pushed.length) return;
-  const { tokens } = await freshTokens(feed.provider, JSON.parse(unseal(feed.credentials)) as Tokens, http, now.getTime());
+  if (!pushed.length) return result;
+  const timesOf = (x: (typeof pushed)[number]) => {
+    const [start, end] = x.fingerprint.split("-").map(Number);
+    return { start, end };
+  };
+  let access: string;
+  try {
+    if (!feed.credentials) throw new ReconnectNeeded();
+    access = (await freshTokens(feed.provider, openTokens(feed.credentials), http, now.getTime())).tokens.access;
+  } catch (err) {
+    return { removed: 0, left: pushed.map(timesOf), reason: err instanceof ReconnectNeeded ? "permission" : "provider" };
+  }
   for (const x of pushed) {
-    await deleteBusy(feed.provider, tokens.access, x.externalId, http).catch(() => {});
+    try {
+      await deleteBusy(feed.provider, access, x.externalId, http);
+    } catch (err) {
+      result.left.push(timesOf(x));
+      result.reason ??= err instanceof ReconnectNeeded ? "permission" : "provider";
+      continue;
+    }
     await db.delete(calendarPushes).where(and(eq(calendarPushes.feedId, feed.id), eq(calendarPushes.sourceKey, x.sourceKey)));
+    result.removed++;
+  }
+  return result;
+}
+
+/** Sealed tokens, or "reconnect" when they can't be opened (a lost or changed key). */
+function openTokens(sealed: string): Tokens {
+  try {
+    return JSON.parse(unseal(sealed)) as Tokens;
+  } catch {
+    throw new ReconnectNeeded();
   }
 }
 

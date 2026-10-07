@@ -77,6 +77,14 @@ export function SettingsPanel({
       <CalendarSettings calendars={calendars} connect={calendarConnect} />
       <CalendarOutSettings state={calendarOut} />
       <YourData analyticsOptOut={analyticsOptOut} />
+      <section>
+        <SectionTitle>Help</SectionTitle>
+        <Card>
+          <p className="text-sm text-ink-2">
+            Something not working, or a question about your data? <a className="font-medium text-brand underline" href="/support">Ask for help</a>. A person reads every message.
+          </p>
+        </Card>
+      </section>
       <Leaving household={household} />
     </div>
   );
@@ -311,8 +319,15 @@ function YourData({ analyticsOptOut }: { analyticsOptOut: boolean }) {
 function Leaving({ household }: { household: WeekView["household"] }) {
   const app = useApp();
   const { run, pending, error } = useCommand(household.id);
-  const [mode, setMode] = useState<"leave" | "delete" | null>(null);
+  const [mode, setMode] = useState<"leave" | "delete" | "close" | null>(null);
   const [confirmName, setConfirmName] = useState("");
+  const [confirmClose, setConfirmClose] = useState("");
+  async function closeAccount() {
+    if (!(await run("LeaveHousehold", { confirm: true }, { refresh: false }))) return;
+    if (!(await run("CloseAccount", { confirm: "close" }, { refresh: false }))) return;
+    await fetch("/api/auth/sign-out", { method: "POST" }).catch(() => {});
+    window.location.replace("/");
+  }
   const done = () => {
     window.location.href = "/setup";
   };
@@ -322,7 +337,28 @@ function Leaving({ household }: { household: WeekView["household"] }) {
       <Card className="flex flex-wrap gap-2">
         <Button variant="danger" onClick={() => setMode("leave")}>Leave household</Button>
         <Button variant="danger" onClick={() => setMode("delete")}>Delete household</Button>
+        <Button variant="danger" onClick={() => setMode("close")}>Close my account</Button>
       </Card>
+      {mode === "close" && (
+        <Dialog
+          open
+          onClose={() => setMode(null)}
+          title="Close your account?"
+          footer={
+            <>
+              <Button onClick={() => setMode(null)}>Keep it</Button>
+              <Button variant="danger" disabled={pending || confirmClose.trim().toLowerCase() !== "close"} onClick={closeAccount}>Close for good</Button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-3 text-[15px]">
+            <ErrorNote message={error?.message} />
+            <p>You leave the household, then everything that was only yours is erased: your journal, check-ins, feedback, what More learned about you, your trial answers and your devices. This can&apos;t be undone.</p>
+            <p className="text-ink-2">Want a copy first? Use “Download my private data” above.</p>
+            <Field label='Type "close" to confirm'>{(id) => <input id={id} className={inputClass} value={confirmClose} onChange={(e) => setConfirmClose(e.target.value)} autoComplete="off" />}</Field>
+          </div>
+        </Dialog>
+      )}
       {mode === "leave" && (
         <Dialog
           open

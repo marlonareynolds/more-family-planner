@@ -7,10 +7,22 @@ async function go(page: Page, path: string) {
   await page.waitForLoadState("networkidle");
 }
 
+/** Anything the content security policy blocked, on any page in the journey. */
+const blocked: string[] = [];
+function watchPolicy(page: Page) {
+  page.on("console", (m) => {
+    if (m.type() === "error" && /Content Security Policy/i.test(m.text())) blocked.push(m.text());
+  });
+}
+test.afterEach(() => {
+  expect(blocked.splice(0)).toEqual([]);
+});
+
 /** A synthetic adult in their own browser context (own cookies). */
 async function adult(browser: Browser, name: string, viewport?: { width: number; height: number }) {
   const ctx = await browser.newContext({ timezoneId: "Europe/London", locale: "en-GB", ...(viewport ? { viewport } : {}) });
   const page = await ctx.newPage();
+  watchPolicy(page);
   await go(page, "/sign-in");
   await page.getByLabel("Or use another name").fill(name);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -72,6 +84,7 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   expect(screen).toMatch(/\/display\//);
   const kitchenContext = await browser.newContext({ viewport: vp });
   const kitchen = await kitchenContext.newPage();
+  watchPolicy(kitchen);
   await kitchen.goto(screen);
   await expect(kitchen.getByRole("heading", { name: "Today" })).toBeVisible();
   await axe(kitchen);

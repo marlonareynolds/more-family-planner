@@ -139,10 +139,21 @@ async function loadAsk(db: Db, token: string) {
   return row ?? null;
 }
 
-/** What the helper sees: nothing beyond the time, first names and a reply. */
+/**
+ * What the helper sees: nothing beyond the time, first names and a reply.
+ * The details are readable only while the link is live: open for an answer,
+ * or after a yes until that care has ended. Expired, declined, withdrawn or
+ * finished asks show nothing about the children (BR-01).
+ */
+export function askIsLive(row: { ask: { response: string | null; expiresAt: Date }; arrangement: { state: string; endAt: Date } }, now: Date): boolean {
+  const open = !row.ask.response && row.ask.expiresAt.getTime() > now.getTime() && row.arrangement.state === "proposed";
+  const agreed = row.ask.response === "yes" && row.arrangement.state === "confirmed" && row.arrangement.endAt.getTime() > now.getTime();
+  return open || agreed;
+}
+
 export async function askView(db: Db, token: string, now = new Date()): Promise<AskView | null> {
   const row = await loadAsk(db, token);
-  if (!row) return null;
+  if (!row || !askIsLive(row, now)) return null;
   const kids = await db.select({ id: children.id, name: children.preferredName }).from(children).where(eq(children.householdId, row.ask.householdId));
   return {
     askerName: row.askerName.split(" ")[0],
@@ -153,12 +164,13 @@ export async function askView(db: Db, token: string, now = new Date()): Promise<
     timeZone: row.timeZone,
     note: row.arrangement.note,
     response: row.ask.response,
-    open: !row.ask.response && row.ask.expiresAt.getTime() > now.getTime() && row.arrangement.state === "proposed",
+    open: !row.ask.response && row.arrangement.state === "proposed",
   };
 }
 
-export async function answerAsk(db: Db, token: string, response: "yes" | "no", now = new Date()): Promise<AskView | null> {
-  await db.transaction(async (tx) => {
+/** Records a helper's answer. Returns what was recorded, or null when the link can't be answered. */
+export async function answerAsk(db: Db, token: string, response: "yes" | "no", now = new Date()): Promise<{ response: "yes" | "no"; open: false } | null> {
+  const answered = await db.transaction(async (tx) => {
     const [ask] = await tx.select().from(careAsks).where(eq(careAsks.tokenHash, hashAskToken(token))).for("update");
     if (!ask) return false;
     const [h] = await tx.select().from(households).where(and(eq(households.id, ask.householdId), isNull(households.deletedAt))).for("update");
@@ -194,5 +206,8 @@ export async function answerAsk(db: Db, token: string, response: "yes" | "no", n
     if (response === "yes") await track(tx, { type: "care_gap_resolved", accountId: ask.createdBy, householdId: h.id, reason: "helper" });
     return true;
   });
-  return askView(db, token, now);
+  if (answered) return { response, open: false };
+  // A second tap on a live link shows the answer already given.
+  const row = await loadAsk(db, token);
+  return row && row.ask.response && askIsLive(row, now) ? { response: row.ask.response, open: false } : null;
 }

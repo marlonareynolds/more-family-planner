@@ -1,20 +1,17 @@
-import { timingSafeEqual } from "node:crypto";
 import { getDb } from "@/db/client";
+import { authorizedCron } from "@/server/ops/cron-auth";
 import { runTick } from "@/server/tick";
 
 export const maxDuration = 60;
 
 /**
- * The scheduled tick: Vercel Cron daily and GitHub Actions every 15 minutes,
- * both with `Authorization: Bearer $CRON_SECRET`.
+ * The scheduled tick: Supabase cron every 5 minutes and Vercel Cron daily,
+ * both with `Authorization: Bearer $CRON_SECRET`. Answers 500 when any step
+ * failed, so the failure shows in the scheduler's history and Vercel's logs.
  */
 export async function GET(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  const given = req.headers.get("authorization") ?? "";
-  const expected = `Bearer ${secret}`;
-  if (!secret || given.length !== expected.length || !timingSafeEqual(Buffer.from(given), Buffer.from(expected))) {
-    return new Response("Not found", { status: 404 });
-  }
-  const stats = await runTick(await getDb());
-  return Response.json(stats, { headers: { "Cache-Control": "no-store" } });
+  if (!authorizedCron(req)) return new Response("Not found", { status: 404 });
+  const { stats, errors } = await runTick(await getDb());
+  if (errors.length) console.error("[tick]", errors.join("; "));
+  return Response.json({ ok: errors.length === 0, errors, stats }, { status: errors.length ? 500 : 200, headers: { "Cache-Control": "no-store" } });
 }

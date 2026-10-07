@@ -4,6 +4,7 @@ import { Ideas } from "@/components/ideas";
 import { Journal } from "@/components/journal";
 import { LearningControls } from "@/components/learning-controls";
 import { MomentList } from "@/components/moment-list";
+import { QuietPhoneSetup } from "@/components/quiet-phone";
 import { loadRange } from "@/server/page-data";
 import { listJournal } from "@/server/queries/journal";
 import { heavyWeek } from "@/server/queries/free-time";
@@ -27,6 +28,7 @@ export default async function MePage({ searchParams }: PageProps<"/me">) {
         <summary className="cursor-pointer font-display text-xl">All ideas</summary>
         <Ideas kind="me" guidance={guidance.effective} lighterWeek={await heavyWeek(db, actor, view.household.timeZone)} />
       </details>
+      <QuietPhoneSetup />
       <Journal data={journal} q={one(sp.q) ?? ""} tag={one(sp.tag) ?? ""} paged={!!one(sp.after)} checkinDone={view.checkinDone} />
       <LearningControls guidance={guidance} />
     </AppProvider>

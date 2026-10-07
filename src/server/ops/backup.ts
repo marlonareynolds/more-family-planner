@@ -66,15 +66,24 @@ async function appliedMigrations(db: Db): Promise<string[] | null> {
 
 const ident = (name: string) => sql.raw(`"${name.replaceAll('"', '""')}"`);
 
+/**
+ * Every table is read inside one repeatable-read, read-only transaction, so
+ * the backup is a single moment: a row written mid-backup is either wholly
+ * in it (with everything it points at) or wholly not.
+ */
 export async function takeBackup(db: Db, now = new Date()): Promise<Backup> {
-  const tables: Backup["tables"] = {};
-  for (const table of await tableNames(db)) {
-    const cols = await writableColumns(db, table);
-    const list = sql.join(cols.map(ident), sql`, `);
-    const rows = await query<{ data: Row }>(db, sql`select to_jsonb(r) as data from (select ${list} from ${ident(table)}) r`);
-    tables[table] = rows.map((r) => (typeof r.data === "string" ? JSON.parse(r.data) : r.data));
-  }
-  return { format: BACKUP_FORMAT, takenAt: now.toISOString(), migrations: await appliedMigrations(db), tables };
+  return db.transaction(async (t) => {
+    const tx = t as unknown as Db;
+    await tx.execute(sql`set transaction isolation level repeatable read, read only`);
+    const tables: Backup["tables"] = {};
+    for (const table of await tableNames(tx)) {
+      const cols = await writableColumns(tx, table);
+      const list = sql.join(cols.map(ident), sql`, `);
+      const rows = await query<{ data: Row }>(tx, sql`select to_jsonb(r) as data from (select ${list} from ${ident(table)}) r`);
+      tables[table] = rows.map((r) => (typeof r.data === "string" ? JSON.parse(r.data) : r.data));
+    }
+    return { format: BACKUP_FORMAT, takenAt: now.toISOString(), migrations: await appliedMigrations(tx), tables };
+  });
 }
 
 /**
@@ -82,7 +91,7 @@ export async function takeBackup(db: Db, now = new Date()): Promise<Backup> {
  * key triggers are paused during the load (tables arrive in any order) and
  * checked explicitly afterwards; unique and exclusion constraints still apply.
  */
-export async function restoreBackup(db: Db, backup: Backup): Promise<void> {
+export async function restoreBackup(db: Db, backup: Backup, opts: { relink?: boolean } = {}): Promise<void> {
   if (backup.format !== BACKUP_FORMAT) throw new Error(`Unknown backup format ${String(backup.format)}`);
   const known = new Set(await tableNames(db));
   await db.transaction(async (tx) => {
@@ -100,7 +109,28 @@ export async function restoreBackup(db: Db, backup: Backup): Promise<void> {
         );
       }
     }
+    // A new sign-in service gives everyone new ids. Mark each open account
+    // so its owner's first sign-in with the same verified email adopts it.
+    if (opts.relink) {
+      await tx.execute(sql`update accounts set identity_subject = 'relink:' || identity_subject where closed_at is null and identity_subject not like 'relink:%'`);
+    }
   });
+}
+
+/** How many open accounts can be reclaimed by email after a relink restore. */
+export async function relinkReadiness(db: Db): Promise<Check> {
+  const [r] = await query<{ ready: string | number; stranded: string | number }>(
+    db,
+    sql`select count(*) filter (where email is not null) as ready, count(*) filter (where email is null) as stranded
+        from accounts where closed_at is null and identity_subject like 'relink:%'`,
+  );
+  const ready = n(r?.ready);
+  const stranded = n(r?.stranded);
+  return {
+    name: "Sign-in recovery",
+    ok: stranded === 0,
+    detail: stranded ? `${stranded} accounts have no email to sign back in with` : `${ready} accounts sign back in with their email`,
+  };
 }
 
 const n = (v: unknown) => Number(v ?? 0);

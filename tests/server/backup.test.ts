@@ -1,6 +1,10 @@
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { createPgliteDb } from "@/db/pglite";
-import { restoreBackup, takeBackup, verifyRestore, type Backup } from "@/server/ops/backup";
+import { accounts } from "@/db/schema";
+import { getWeek } from "@/server/queries/week";
+import { accountFor } from "@/server/auth";
+import { relinkReadiness, restoreBackup, takeBackup, verifyRestore, type Backup } from "@/server/ops/backup";
 import { decodeBackup, encodeBackup } from "@/server/ops/backup-file";
 import { newWorld, timed } from "./harness";
 
@@ -47,5 +51,41 @@ describe("backup and restore rehearsal", () => {
     await restoreBackup(restored, damaged);
     const failed = (await verifyRestore(restored, backup)).filter((c) => !c.ok).map((c) => c.name);
     expect(failed).toEqual(expect.arrayContaining(["Row counts", "References", "Money totals"]));
+  });
+
+  it("BR-08: after a restore onto a new sign-in service, both adults sign back into their own accounts", async () => {
+    const w = await seeded();
+    await w.db.update(accounts).set({ email: "alex@example.com" }).where(eq(accounts.id, w.alex.accountId));
+    await w.db.update(accounts).set({ email: "Sam@Example.com" }).where(eq(accounts.id, w.sam.accountId));
+    const backup = await takeBackup(w.db);
+
+    const restored = await createPgliteDb();
+    await restoreBackup(restored, backup, { relink: true });
+    expect((await verifyRestore(restored, backup)).filter((c) => !c.ok)).toEqual([]);
+    expect(await relinkReadiness(restored)).toMatchObject({ ok: true, detail: "2 accounts sign back in with their email" });
+    // The old sign-in ids no longer open anything.
+    const stranger = await accountFor(restored, { subject: "test:alex", displayName: "Alex" });
+    expect(stranger.accountId).not.toBe(w.alex.accountId);
+
+    // An unverified email can't claim an account.
+    const unverified = await accountFor(restored, { subject: "supabase:new-x", displayName: "X", email: "alex@example.com" });
+    expect(unverified.accountId).not.toBe(w.alex.accountId);
+
+    // New ids from the new sign-in service, same verified emails.
+    const alex = await accountFor(restored, { subject: "supabase:new-alex", displayName: "Alex", email: "alex@example.com", emailVerified: true });
+    const sam = await accountFor(restored, { subject: "supabase:new-sam", displayName: "Sam", email: "sam@example.com", emailVerified: true });
+    expect([alex.accountId, sam.accountId]).toEqual([w.alex.accountId, w.sam.accountId]);
+    // Signing in again keeps working, and nobody else can take the account now.
+    expect((await accountFor(restored, { subject: "supabase:new-alex", displayName: "Alex" })).accountId).toBe(w.alex.accountId);
+    const late = await accountFor(restored, { subject: "supabase:other", displayName: "Other", email: "alex@example.com", emailVerified: true });
+    expect(late.accountId).not.toBe(w.alex.accountId);
+
+    // Each sees their own household, with private time still private.
+    const alexWeek = JSON.stringify(await getWeek(restored, alex, "2030-10-07"));
+    const samWeek = JSON.stringify(await getWeek(restored, sam, "2030-10-07"));
+    expect(alexWeek).toContain("Pottery class");
+    expect(samWeek).toContain("Dinner");
+    expect(samWeek).not.toContain("Pottery class");
+    expect(samWeek).not.toContain("Therapy");
   });
 });

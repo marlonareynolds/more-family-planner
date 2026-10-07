@@ -3,7 +3,7 @@ import { z } from "zod";
 import { checkins, feedback, journalEntries, notifications, preferences, suppressions } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import { isWeekKey } from "@/domain/time";
-import { defineCommand, assertVersion } from "../pipeline";
+import { defineCommand, assertVersion, type AccountContext } from "../pipeline";
 import { dateString, shortText } from "./helpers";
 
 /**
@@ -13,6 +13,18 @@ import { dateString, shortText } from "./helpers";
  */
 
 const tag = z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9 -]{0,23}$/, "Tags use letters, numbers and dashes.");
+
+/** The entry, row-locked for the rest of this transaction; owner-scoped. */
+async function lockedEntry(ctx: AccountContext, entryId: string) {
+  const [row] = await ctx.tx
+    .select()
+    .from(journalEntries)
+    .where(and(eq(journalEntries.id, entryId), eq(journalEntries.accountId, ctx.actor.accountId), isNull(journalEntries.deletedAt)))
+    .for("update");
+  return row;
+}
+
+const staleEntry = () => new DomainError("STALE_VERSION", "This entry changed since you opened it. Your text is still here: copy it, then refresh.");
 
 export const saveJournalEntry = defineCommand({
   name: "SaveJournalEntry",
@@ -33,16 +45,16 @@ export const saveJournalEntry = defineCommand({
         .returning();
       return { entryId: e.id, version: e.version };
     }
-    const [row] = await ctx.tx
-      .select()
-      .from(journalEntries)
-      .where(and(eq(journalEntries.id, p.entryId), eq(journalEntries.accountId, ctx.actor.accountId), isNull(journalEntries.deletedAt)));
+    const row = await lockedEntry(ctx, p.entryId);
     assertVersion(row, p.version, "This entry");
+    // Compare-and-set: the write itself carries the expected version, so two
+    // saves from one version can never both land (BR-02).
     const [e] = await ctx.tx
       .update(journalEntries)
       .set({ entryDate: p.entryDate, title: p.title, body: p.body, tags: [...new Set(p.tags)], updatedAt: ctx.now, version: sql`${journalEntries.version} + 1` })
-      .where(eq(journalEntries.id, row.id))
+      .where(and(eq(journalEntries.id, row.id), eq(journalEntries.accountId, ctx.actor.accountId), eq(journalEntries.version, p.version!), isNull(journalEntries.deletedAt)))
       .returning();
+    if (!e) throw staleEntry();
     return { entryId: e.id, version: e.version };
   },
 });
@@ -52,22 +64,26 @@ export const deleteJournalEntry = defineCommand({
   scope: "account",
   payload: z.object({ entryId: z.uuid(), version: z.number().int() }),
   async handler(ctx, p) {
-    const [row] = await ctx.tx
-      .select()
-      .from(journalEntries)
-      .where(and(eq(journalEntries.id, p.entryId), eq(journalEntries.accountId, ctx.actor.accountId), isNull(journalEntries.deletedAt)));
+    const row = await lockedEntry(ctx, p.entryId);
     assertVersion(row, p.version, "This entry");
     // Body is cleared immediately; the tombstone allows undo of the listing only.
-    await ctx.tx
+    // Deleting needs the version you saw, so a newer save is never wiped unseen (BR-03).
+    const done = await ctx.tx
       .update(journalEntries)
       .set({ deletedAt: ctx.now, body: "", title: "", tags: [], version: sql`${journalEntries.version} + 1` })
-      .where(eq(journalEntries.id, row.id));
+      .where(and(eq(journalEntries.id, row.id), eq(journalEntries.accountId, ctx.actor.accountId), eq(journalEntries.version, p.version), isNull(journalEntries.deletedAt)))
+      .returning({ id: journalEntries.id });
+    if (!done.length) throw staleEntry();
     return { deleted: true };
   },
 });
 
 const scale = z.number().int().min(1).max(5).nullable().default(null);
 
+/**
+ * One check-in per adult per week, last write wins by decision: it is a
+ * two-question form only its author edits, so there is no expected version.
+ */
 export const saveCheckin = defineCommand({
   name: "SaveCheckin",
   scope: "account",

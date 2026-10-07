@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb, type DbOrTx } from "@/db/client";
 import { accounts } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
@@ -20,6 +20,8 @@ export interface Identity {
   displayName: string;
   /** Verified by the identity provider; only used for the weekly email. */
   email?: string;
+  /** The provider confirmed the person controls this email (magic link or OTP). */
+  emailVerified?: boolean;
 }
 
 export type AuthMode = "supabase" | "dev";
@@ -78,6 +80,8 @@ export async function accountFor(db: DbOrTx, identity: Identity): Promise<Actor>
     }
     return { accountId: existing.id, displayName: existing.displayName };
   }
+  const relinked = await relink(db, identity);
+  if (relinked) return relinked;
   const [created] = await db
     .insert(accounts)
     .values({ identitySubject: identity.subject, displayName: identity.displayName.slice(0, 60) || "You", email: identity.email ?? null })
@@ -86,6 +90,27 @@ export async function accountFor(db: DbOrTx, identity: Identity): Promise<Actor>
   if (created) return { accountId: created.id, displayName: created.displayName };
   const [raced] = await db.select().from(accounts).where(eq(accounts.identitySubject, identity.subject));
   return { accountId: raced.id, displayName: raced.displayName };
+}
+
+/**
+ * After a restore onto a new sign-in service (docs/restore.md), accounts are
+ * marked `relink:` and wait for their owner. The first sign-in with the same
+ * verified email takes the account back, with its household and history.
+ */
+async function relink(db: DbOrTx, identity: Identity): Promise<Actor | null> {
+  if (!identity.email || !identity.emailVerified) return null;
+  const [claimed] = await db
+    .update(accounts)
+    .set({ identitySubject: identity.subject })
+    .where(
+      eq(
+        accounts.id,
+        sql`(select id from accounts where lower(email) = lower(${identity.email}) and identity_subject like 'relink:%' and closed_at is null
+             order by created_at limit 1 for update skip locked)`,
+      ),
+    )
+    .returning();
+  return claimed ? { accountId: claimed.id, displayName: claimed.displayName } : null;
 }
 
 /** Read the verified identity for the current request, if any. */
@@ -111,7 +136,7 @@ export async function currentIdentity(): Promise<Identity | null> {
   const { data } = await supabase.auth.getUser();
   if (!data.user) return null;
   const name = (data.user.user_metadata?.full_name as string | undefined) ?? data.user.email?.split("@")[0] ?? "You";
-  return { subject: `supabase:${data.user.id}`, displayName: name, email: data.user.email ?? undefined };
+  return { subject: `supabase:${data.user.id}`, displayName: name, email: data.user.email ?? undefined, emailVerified: Boolean(data.user.email_confirmed_at) };
 }
 
 export async function currentActor(): Promise<Actor | null> {

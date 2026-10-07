@@ -188,7 +188,7 @@ function EntryEditor({ draft, onClose }: { draft: Draft; onClose: () => void }) 
       }
     >
       <div className="flex flex-col gap-4">
-        <ErrorNote message={error?.code === "CONFLICT" ? "This entry changed in another tab. Close and reopen it to see the latest; your text is kept as a draft." : error?.message} />
+        <ErrorNote message={error?.code === "CONFLICT" || error?.code === "STALE_VERSION" ? "This entry changed elsewhere. Your text is kept here and as a draft: copy it, close and reopen to see the latest." : error?.message} />
         <Field label="Date">{(id) => <input id={id} type="date" className={inputClass} value={d.entryDate} onChange={(e) => update({ entryDate: e.target.value })} />}</Field>
         <Field label="Title (optional)">{(id) => <input id={id} className={inputClass} maxLength={120} value={d.title} onChange={(e) => update({ title: e.target.value })} />}</Field>
         <Field label="Entry">

@@ -5,7 +5,7 @@
  */
 import { appendFileSync, readFileSync } from "node:fs";
 import { createPgliteDb } from "@/db/pglite";
-import { restoreBackup, verifyRestore } from "@/server/ops/backup";
+import { relinkReadiness, restoreBackup, verifyRestore } from "@/server/ops/backup";
 import { decodeBackup } from "@/server/ops/backup-file";
 
 const [file, flag, summary] = process.argv.slice(2);
@@ -16,8 +16,8 @@ if (!file) {
 const started = Date.now();
 const backup = decodeBackup(readFileSync(file), process.env.BACKUP_PASSPHRASE || undefined);
 const db = await createPgliteDb();
-await restoreBackup(db, backup);
-const checks = await verifyRestore(db, backup);
+await restoreBackup(db, backup, { relink: true });
+const checks = [...(await verifyRestore(db, backup)), await relinkReadiness(db)];
 const seconds = ((Date.now() - started) / 1000).toFixed(1);
 const ok = checks.every((c) => c.ok);
 

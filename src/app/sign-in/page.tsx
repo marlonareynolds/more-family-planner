@@ -12,6 +12,9 @@ export default async function SignIn(props: PageProps<"/sign-in">) {
       <p className="font-display text-3xl text-brand">More</p>
       <h1 className="font-display text-3xl">Sign in</h1>
       <SignInForm mode={authMode()} next={typeof next === "string" ? next : "/today"} />
+      <p className="text-sm text-ink-3">
+        Can&apos;t get in? <a className="underline" href="/support">Ask for help</a>.
+      </p>
     </main>
   );
 }

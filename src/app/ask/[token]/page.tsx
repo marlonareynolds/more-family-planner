@@ -16,8 +16,8 @@ export default async function AskPage(props: PageProps<"/ask/[token]">) {
     return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-4 px-6 py-16">
         <p className="font-display text-3xl text-brand">More</p>
-        <h1 className="font-display text-2xl">This link isn&apos;t valid any more.</h1>
-        <p className="text-ink-2">Ask whoever sent it for a new one.</p>
+        <h1 className="font-display text-2xl">This link has ended.</h1>
+        <p className="text-ink-2">If you need anything, ask whoever sent it.</p>
       </main>
     );
   }
