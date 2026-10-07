@@ -70,3 +70,17 @@ describe("trips and time away", () => {
     await expect(w.run(w.alex, "AddTrip", trip({ travellerIds: [] }))).rejects.toThrow(/who is going/i);
   });
 });
+
+describe("free together", () => {
+  it("lists the evenings both adults are free, the same fact for each", async () => {
+    const { freeTogetherIn } = await import("@/server/queries/free-time");
+    const w = await newWorld();
+    await w.run(w.sam, "AddEvent", { title: "Late shift", span: timed("2030-10-08", "17:00", "23:00"), adultIds: [w.sam.accountId] });
+    const now = new Date("2030-10-06T12:00:00Z");
+    const forAlex = await freeTogetherIn(w.db, w.alex, await w.week(w.alex, WEEK, now), now);
+    const forSam = await freeTogetherIn(w.db, w.sam, await w.week(w.sam, WEEK, now), now);
+    expect(forAlex).toEqual(forSam);
+    expect(Object.keys(forAlex)).not.toContain("2030-10-08");
+    expect(Object.keys(forAlex)).toContain("2030-10-09");
+  });
+});

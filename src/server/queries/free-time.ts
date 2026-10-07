@@ -4,7 +4,7 @@ import { accounts, calendarFeeds, checkins, children, memberships } from "@/db/s
 import { DomainError } from "@/domain/errors";
 import { suggestTimes, type MomentKind, type SuggestedTime } from "@/domain/free-time";
 import { bankHoliday } from "@/lib/bank-holidays";
-import { currentWeekKey } from "@/domain/time";
+import { addDays, currentWeekKey, startOfLocalDate } from "@/domain/time";
 import type { Actor } from "../auth";
 import { STALE_AFTER_MS } from "../calendar-sync";
 import { loadBusy, loadEventOccurrences } from "./busy";
@@ -71,4 +71,22 @@ export async function heavyWeek(db: Db, actor: Actor, timeZone: string, now = ne
     .from(checkins)
     .where(and(eq(checkins.accountId, actor.accountId), eq(checkins.weekKey, currentWeekKey(timeZone, now.getTime()))));
   return !!mine && ((mine.energy !== null && mine.energy <= 2) || (mine.pressure !== null && mine.pressure >= 4));
+}
+
+/**
+ * The first evening start on each day of a week that is free for both
+ * adults (blueprint: "free together" windows). A fact both partners see;
+ * what to do with it stays each person's own.
+ */
+export async function freeTogetherIn(db: Db, actor: Actor, week: { weekKey: string; household: { timeZone: string }; adults: unknown[] }, now = new Date()): Promise<Record<string, { startTime: string; care: SuggestedTime["care"] }>> {
+  const out: Record<string, { startTime: string; care: SuggestedTime["care"] }> = {};
+  const tz = week.household.timeZone;
+  const weekEnd = startOfLocalDate(addDays(week.weekKey, 7), tz);
+  const from = Math.max(now.getTime(), startOfLocalDate(week.weekKey, tz));
+  if (week.adults.length < 2 || from >= weekEnd) return out;
+  const evenings = await freeTimesFor(db, actor, "us", 150, new Date(from), Math.ceil((weekEnd - from) / 86_400_000), ["18:30", "20:00"]);
+  for (const s of [...evenings.slots].sort((a, b) => a.start - b.start)) {
+    if (s.start < weekEnd && !out[s.date]) out[s.date] = { startTime: s.startTime, care: s.care };
+  }
+  return out;
 }

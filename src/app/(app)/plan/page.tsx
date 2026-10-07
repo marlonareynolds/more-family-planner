@@ -4,7 +4,7 @@ import { PlanWeekFlow } from "@/components/plan-week";
 import { planningWeekKey } from "@/domain/reach";
 import { addDays, startOfLocalDate } from "@/domain/time";
 import { requireHousehold } from "@/server/page-data";
-import { freeTimesFor } from "@/server/queries/free-time";
+import { freeTogetherIn } from "@/server/queries/free-time";
 import { picksFor, type WeekPicks } from "@/server/queries/picks";
 import { getWeek } from "@/server/queries/week";
 
@@ -33,8 +33,7 @@ export default async function PlanPage() {
     // Only times inside the week being planned.
     picks[k] = { ...res, picks: res.picks.filter((p) => !p.slot || p.slot.start < weekEnd) };
   }
-  const evenings = week.adults.length > 1 ? (await freeTimesFor(db, actor, "us", 150, from, days, ["18:30", "20:00"])).slots.filter((s) => s.start < weekEnd) : [];
-  const freeEvenings = [...new Set(evenings.map((s) => s.date))].sort();
+  const freeEvenings = Object.keys(await freeTogetherIn(db, actor, week, now)).sort();
   return (
     <AppProvider value={infoFrom(week)}>
       <PlanWeekFlow week={week} picks={picks} freeEvenings={freeEvenings} />

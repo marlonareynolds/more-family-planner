@@ -33,7 +33,7 @@ function itemsByDay(week: WeekView, timeZone: string): Map<string, Item[]> {
   return map;
 }
 
-export function WeekBoard({ week, mode = "week" }: { week: WeekView; mode?: "week" | "today" }) {
+export function WeekBoard({ week, mode = "week", freeTogether = {} }: { week: WeekView; mode?: "week" | "today"; freeTogether?: Record<string, { startTime: string; care: string }> }) {
   const app = useApp();
   const [view, setView] = useState<"agenda" | "grid">("agenda");
   const [editingEvent, setEditingEvent] = useState<WeekEvent | null>(null);
@@ -97,7 +97,7 @@ export function WeekBoard({ week, mode = "week" }: { week: WeekView; mode?: "wee
                   <AwayChips trips={week.trips} date={date} />
                 </h2>
                 <span className="flex items-center gap-2 text-sm text-ink-3">
-                  Free
+                  {freeTogether[date] ? <FreeTogether at={freeTogether[date]} /> : "Free"}
                   {mode === "week" && <button className="flex min-h-9 items-center gap-1 rounded-full px-2 text-brand hover:bg-brand-soft" onClick={() => setChooser(date)} aria-label={`Add on ${fmtDate(date)}`}><Plus aria-hidden size={15} />Add</button>}
                 </span>
               </section>
@@ -116,6 +116,7 @@ export function WeekBoard({ week, mode = "week" }: { week: WeekView; mode?: "wee
                   <button className="flex min-h-9 items-center gap-1 rounded-full px-2 text-sm text-brand hover:bg-brand-soft" onClick={() => setChooser(date)} aria-label={`Add on ${fmtDate(date)}`}><Plus aria-hidden size={15} />Add</button>
                 )}
               </div>
+              {freeTogether[date] && <p className="mb-2 text-sm text-ink-3"><FreeTogether at={freeTogether[date]} /></p>}
               {list.length === 0 ? (
                 <p className="text-sm text-ink-3">–</p>
               ) : (
@@ -226,5 +227,20 @@ function AwayChips({ trips, date }: { trips: WeekView["trips"]; date: string }) 
         return <span key={t.id} className="ml-2 rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-ink-2">{label}</span>;
       })}
     </>
+  );
+}
+
+/**
+ * A quiet fact, the same for both of you: this evening is free. The link
+ * opens your own concierge, never a shared prompt.
+ */
+function FreeTogether({ at }: { at: { startTime: string; care: string } }) {
+  const app = useApp();
+  return (
+    <Link href="/us/date-night" className="inline-flex items-center gap-1 rounded-full px-1 text-us underline-offset-2 hover:underline">
+      <Heart aria-hidden size={13} />
+      Evening free for you and {app.partner?.displayName ?? "your partner"} from {at.startTime}
+      {at.care === "needs_care" ? ", children need someone" : ""}
+    </Link>
   );
 }
