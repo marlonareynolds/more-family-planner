@@ -3,12 +3,15 @@ import type { Db } from "@/db/client";
 import {
   acceptances,
   accounts,
+  calendarFeeds,
   careArrangements,
   careRequirements,
   checkins,
   children,
   expenses,
   feedback,
+  helpers,
+  highlights,
   households,
   invitations,
   memberships,
@@ -16,7 +19,11 @@ import {
   notifications,
   paymentTransactions,
   preparationTasks,
+  rituals,
+  weekPlans,
 } from "@/db/schema";
+import { cadenceLabel } from "@/domain/rituals";
+import { planningWeekKey } from "@/domain/reach";
 import { canSeeDetails, findConflicts, type Busy } from "@/domain/availability";
 import { coverageFor, groupCoverage, type CareArrangement, type CoverageState } from "@/domain/care";
 import { DomainError } from "@/domain/errors";
@@ -25,7 +32,11 @@ import { summarise, type ExpenseSummary } from "@/domain/money";
 import { hiddenReason, isAgreed, latestDecision, readiness, stageLabel, type Decision, type ReadinessGap } from "@/domain/moments";
 import { addDays, instantToLocalDate, isWeekKey, startOfLocalDate, weekKeyFor } from "@/domain/time";
 import type { Actor } from "../auth";
+import type { PlaceView } from "@/lib/places";
+import { placesFor } from "./places";
 import { loadBusy, loadEventOccurrences } from "./busy";
+import { STALE_AFTER_MS } from "../calendar-sync";
+import { bankHoliday } from "@/lib/bank-holidays";
 
 /**
  * The viewer-specific week projection (spec 12.2 GET /weeks/{weekKey}).
@@ -62,6 +73,23 @@ export interface WeekEvent {
   localStart: string;
   durationMinutes: number;
   rule: unknown;
+  /** Imported from a connected calendar: read-only here. Label shown to its owner only. */
+  imported: boolean;
+  importedFrom: string | null;
+}
+
+/** A connected calendar's health. Partners see only that it exists and whether it's current. */
+export interface CalendarView {
+  id: string;
+  ownerId: string;
+  mine: boolean;
+  label: string;
+  visibility: "shared" | "busy_only" | "private";
+  version: number;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  eventCount: number;
+  stale: boolean;
 }
 
 export interface MomentView {
@@ -102,6 +130,29 @@ export interface MomentView {
   tasks: { id: string; title: string; ownerId: string; state: "open" | "done"; version: number }[];
   myFeedbackSaved: boolean;
   expenseId: string | null;
+  ritualId: string | null;
+  chosenByChildId: string | null;
+  /** One-line shared memories, visible to everyone in the plan. */
+  highlights: { authorId: string; authorName: string; text: string; mine: boolean }[];
+}
+
+export interface RitualView {
+  id: string;
+  kind: "me" | "us" | "family";
+  title: string;
+  label: string;
+  cadence: "weekly" | "fortnightly" | "monthly";
+  startsOn: string;
+  startTime: string;
+  durationMinutes: number;
+  organiserId: string;
+  participantIds: string[];
+  childIds: string[];
+  agreedBy: string[];
+  awaitingMe: boolean;
+  active: boolean;
+  detailsHidden: boolean;
+  version: number;
 }
 
 export interface CareDay {
@@ -142,7 +193,7 @@ export interface AttentionItem {
   key: string;
   priority: number;
   text: string;
-  action: "respond" | "review" | "task" | "care" | "care-gap" | "reflect" | "complete" | "checkin" | "invite";
+  action: "respond" | "review" | "task" | "care" | "care-gap" | "reflect" | "complete" | "checkin" | "invite" | "calendar" | "date-ahead" | "ritual" | "plan-week";
   targetId?: string;
   date?: string;
 }
@@ -171,6 +222,16 @@ export interface WeekView {
   attention: AttentionItem[];
   notifications: { id: string; text: string; createdAt: string; read: boolean; sourceType: string | null; sourceId: string | null }[];
   checkinDone: boolean;
+  calendars: CalendarView[];
+  /** Public holiday names by date: markers only, not proof anyone is off. */
+  markers: Record<string, string>;
+  rituals: RitualView[];
+  /** The household's village: people who help with the children. */
+  helpers: { id: string; name: string; relation: string; phone: string; version: number }[];
+  /** The week the household is planning now, and whether it has been planned. */
+  planning: { weekKey: string; planned: boolean };
+  /** The household's own local places, offered ahead of general ideas. */
+  places: PlaceView[];
 }
 
 function hiddenLabel(m: MomentView | undefined): string | null {
@@ -224,6 +285,22 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
 
   // ── Events (masked per viewer) ──
   const occurrences = await loadEventOccurrences(db, household.id, horizon);
+  const feedRows = await db.select().from(calendarFeeds).where(eq(calendarFeeds.householdId, household.id));
+  const calendars: CalendarView[] = feedRows.map((f) => {
+    const mine = f.accountId === viewer;
+    return {
+      id: f.id,
+      ownerId: f.accountId,
+      mine,
+      label: mine ? f.label : "Calendar",
+      visibility: f.visibility,
+      version: f.version,
+      lastSuccessAt: f.lastSuccessAt?.toISOString() ?? null,
+      lastError: mine ? f.lastError : null,
+      eventCount: mine ? f.eventCount : 0,
+      stale: !f.lastSuccessAt || now.getTime() - f.lastSuccessAt.getTime() > STALE_AFTER_MS,
+    };
+  });
   const eventsOut: WeekEvent[] = [];
   for (const o of occurrences) {
     const r = o.row;
@@ -253,6 +330,8 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
       localStart: r.localStart,
       durationMinutes: r.durationMinutes,
       rule: hidden ? null : r.rule,
+      imported: !!r.feedId,
+      importedFrom: mine && r.feedId ? (feedRows.find((f) => f.id === r.feedId)?.label ?? null) : null,
     });
   }
 
@@ -277,6 +356,7 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     ? await db.select({ momentId: feedback.momentId }).from(feedback).where(and(eq(feedback.accountId, viewer), inArray(feedback.momentId, momentIds)))
     : [];
   const feedbackSet = new Set(myFeedback.map((f) => f.momentId));
+  const highlightRows = momentIds.length ? await db.select().from(highlights).where(inArray(highlights.momentId, momentIds)).orderBy(highlights.createdAt) : [];
 
   // ── Care ──
   const reqRows = await db
@@ -402,6 +482,15 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
       tasks: hidden ? [] : tasks.map((t) => ({ id: t.id, title: t.title, ownerId: t.ownerId, state: t.state, version: t.version })),
       myFeedbackSaved: feedbackSet.has(m.id),
       expenseId: null,
+      ritualId: m.ritualId,
+      chosenByChildId: hidden ? null : m.chosenByChildId,
+      // Highlights belong to the people in the plan (and the whole family's plans to both adults).
+      highlights:
+        hidden || !(m.participantIds.includes(viewer) || m.kind === "family")
+          ? []
+          : highlightRows
+              .filter((h) => h.momentId === m.id)
+              .map((h) => ({ authorId: h.accountId, authorName: adults.find((a) => a.id === h.accountId)?.displayName ?? "Someone", text: h.text, mine: h.accountId === viewer })),
     });
   }
 
@@ -472,7 +561,40 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     .from(checkins)
     .where(and(eq(checkins.accountId, viewer), eq(checkins.weekKey, weekKeyFor(fromDate))));
 
-  const attention = buildAttention({ viewer, momentsOut, careDays, careAwaitingMe, kids, adults, now, tz, checkinDone: !!checkin, openInvite: !!invite });
+  const datesAhead = await importantDatesAhead(db, household.id, viewer, now, tz);
+
+  // ── Rituals and the weekly plan ──
+  const ritualRows = await db.select().from(rituals).where(and(eq(rituals.householdId, household.id), isNull(rituals.endedAt))).orderBy(rituals.createdAt);
+  const ritualsOut: RitualView[] = ritualRows
+    .filter((r) => r.kind !== "me" || r.organiserId === viewer || r.agreedBy.length === r.participantIds.length)
+    .map((r) => {
+      const hidden = r.kind === "me" && r.organiserId !== viewer;
+      const organiserName = adults.find((a) => a.id === r.organiserId)?.displayName ?? "Your partner";
+      return {
+        id: r.id,
+        kind: r.kind,
+        title: hidden ? `${organiserName}: time for themselves` : r.title,
+        label: cadenceLabel(r.cadence, r.startsOn),
+        cadence: r.cadence,
+        startsOn: r.startsOn,
+        startTime: r.startTime,
+        durationMinutes: r.durationMinutes,
+        organiserId: r.organiserId,
+        participantIds: r.participantIds,
+        childIds: r.childIds,
+        agreedBy: r.agreedBy,
+        awaitingMe: r.participantIds.includes(viewer) && !r.agreedBy.includes(viewer),
+        active: r.participantIds.every((p) => r.agreedBy.includes(p)),
+        detailsHidden: hidden,
+        version: r.version,
+      };
+    });
+  const helperRows = await db.select().from(helpers).where(and(eq(helpers.householdId, household.id), isNull(helpers.archivedAt))).orderBy(helpers.createdAt);
+  const planningKey = planningWeekKey(now.getTime(), tz);
+  const [plan] = await db.select({ k: weekPlans.weekKey }).from(weekPlans).where(and(eq(weekPlans.householdId, household.id), eq(weekPlans.weekKey, planningKey))).limit(1);
+  const planning = { weekKey: planningKey, planned: !!plan };
+
+  const attention = buildAttention({ viewer, momentsOut, careDays, careAwaitingMe, kids, adults, now, tz, checkinDone: !!checkin, openInvite: !!invite, calendars, datesAhead, rituals: ritualsOut, planning });
 
   return {
     me: { id: viewer, displayName: adults.find((a) => a.id === viewer)?.displayName ?? actor.displayName },
@@ -505,7 +627,44 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
       sourceId: n.sourceId,
     })),
     checkinDone: !!checkin,
+    calendars,
+    rituals: ritualsOut,
+    helpers: helperRows.map((h) => ({ id: h.id, name: h.name, relation: h.relation, phone: h.phone, version: h.version })),
+    planning,
+    places: await placesFor(db, household.id),
+    markers: Object.fromEntries(dayList.flatMap((d) => {
+      const name = bankHoliday(d, tz);
+      return name ? [[d, name]] : [];
+    })),
   };
+}
+
+/**
+ * Yearly all-day dates (birthdays, anniversaries) coming up in the next two
+ * weeks that this viewer can see, unless a plan already exists that day
+ * (spec 8.2: recurring important dates).
+ */
+async function importantDatesAhead(db: Db, householdId: string, viewer: string, now: Date, tz: string) {
+  const start = startOfLocalDate(instantToLocalDate(now.getTime(), tz), tz);
+  const horizon = { start, end: start + 15 * 86_400_000 };
+  const occ = await loadEventOccurrences(db, householdId, horizon);
+  const planned = await db
+    .select({ startAt: moments.startAt })
+    .from(moments)
+    .where(and(eq(moments.householdId, householdId), gt(moments.endAt, new Date(horizon.start)), lt(moments.startAt, new Date(horizon.end)), sql`${moments.lifecycle} <> 'cancelled'`, sql`${moments.kind} <> 'me'`));
+  const plannedDays = new Set(planned.map((m) => instantToLocalDate(m.startAt.getTime(), tz)));
+  const today = instantToLocalDate(now.getTime(), tz);
+  const out: { id: string; title: string; date: string; days: number }[] = [];
+  for (const o of occ) {
+    const rule = o.row.rule as { freq?: string } | null;
+    if (!o.row.allDay || rule?.freq !== "YEARLY" || o.row.feedId) continue;
+    if (o.row.ownerId !== viewer && !canSeeDetails(o.row, viewer)) continue;
+    const date = instantToLocalDate(o.start, tz);
+    if (date < today || plannedDays.has(date)) continue;
+    const days = Math.round((Date.parse(`${date}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000);
+    if (days <= 14) out.push({ id: o.eventId, title: o.row.title, date, days });
+  }
+  return out.sort((a, b) => a.days - b.days).slice(0, 3);
 }
 
 function buildAttention(input: {
@@ -519,6 +678,10 @@ function buildAttention(input: {
   tz: string;
   checkinDone: boolean;
   openInvite: boolean;
+  calendars: CalendarView[];
+  datesAhead: { id: string; title: string; date: string; days: number }[];
+  rituals: RitualView[];
+  planning: { weekKey: string; planned: boolean };
 }): AttentionItem[] {
   const { viewer, now } = input;
   const out: AttentionItem[] = [];
@@ -545,6 +708,17 @@ function buildAttention(input: {
       out.push({ key: `reflect:${m.id}`, priority: 4, text: `How was “${m.title}”? (only you see this)`, action: "reflect", targetId: m.id });
     }
   }
+  for (const r of input.rituals.filter((r) => r.awaitingMe)) {
+    const who = input.adults.find((a) => a.id === r.organiserId)?.displayName ?? "Your partner";
+    out.push({ key: `ritual:${r.id}:${r.version}`, priority: 1, text: `${who} suggested “${r.title}”, ${r.label.toLowerCase()}`, action: "ritual", targetId: r.id });
+  }
+  // Own the weekly planning moment (spec 3.3): from Friday, offer next week.
+  if (!input.planning.planned) {
+    const dow = new Date(`${instantToLocalDate(nowMs, input.tz)}T12:00:00Z`).getUTCDay();
+    if (dow === 0 || dow >= 5 || dow === 1) {
+      out.push({ key: `plan-week:${input.planning.weekKey}`, priority: 2, text: "Take ten minutes together to plan the week", action: "plan-week" });
+    }
+  }
   for (const a of input.careAwaitingMe) {
     out.push({ key: `care:${a.id}`, priority: 1, text: `Can you look after ${names(a.childIds)}?`, action: "care", targetId: a.id });
   }
@@ -554,6 +728,17 @@ function buildAttention(input: {
         out.push({ key: `gap:${day.date}:${g.childIds.join(",")}:${g.reason}`, priority: 2, text: `${names(g.childIds)} still needs care (${g.reason})`, action: "care-gap", date: day.date });
       }
     }
+  }
+  // A stale calendar makes availability uncertain (spec 8.11): say so.
+  for (const c of input.calendars.filter((c) => c.mine && c.stale && c.lastSuccessAt)) {
+    out.push({ key: `calendar:${c.id}`, priority: 3, text: `“${c.label}” hasn't updated since ${c.lastSuccessAt!.slice(0, 10)}, so free time may be wrong`, action: "calendar", targetId: c.id });
+  }
+  for (const c of input.calendars.filter((c) => c.mine && !c.lastSuccessAt && c.lastError)) {
+    out.push({ key: `calendar:${c.id}`, priority: 3, text: `“${c.label}” couldn't be read. Check the link in Settings`, action: "calendar", targetId: c.id });
+  }
+  for (const d of input.datesAhead) {
+    const when = d.days === 0 ? "is today" : d.days === 1 ? "is tomorrow" : `is in ${d.days} days`;
+    out.push({ key: `date:${d.id}:${d.date}`, priority: 3, text: `“${d.title}” ${when}. Want to plan something?`, action: "date-ahead", targetId: d.id, date: d.date });
   }
   if (input.adults.length < 2 && !input.openInvite) {
     out.push({ key: "invite", priority: 5, text: "Invite your partner when you're ready", action: "invite" });

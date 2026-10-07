@@ -1,7 +1,7 @@
 import { and, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Tx } from "@/db/client";
-import { careArrangements, careRequirements, expenses, holidayPeriods } from "@/db/schema";
+import { careArrangements, careAsks, careRequirements, expenses, holidayPeriods } from "@/db/schema";
 import { findConflicts } from "@/domain/availability";
 import { assertCanConfirm } from "@/domain/care";
 import { DomainError } from "@/domain/errors";
@@ -280,6 +280,7 @@ export const arrangeCare = defineCommand({
     }
     await ctx.bumpSchedule();
     await ctx.audit("care.arrange", "care", a.id);
+    if (a.state === "confirmed") await ctx.track("care_gap_resolved", p.kind);
     return { arrangementId: a.id, state: a.state };
   },
 });
@@ -321,6 +322,7 @@ export const respondToCare = defineCommand({
     }
     await ctx.bumpSchedule();
     await ctx.audit(`care.${p.decision}`, "care", a.id);
+    if (p.decision === "confirm") await ctx.track("care_gap_resolved", a.kind);
     return { arrangementId: a.id };
   },
 });
@@ -344,6 +346,7 @@ export const removeCare = defineCommand({
         .set({ state: "declined", version: sql`${careArrangements.version} + 1` })
         .where(eq(careArrangements.id, a.id));
     } else {
+      if (a.state !== "confirmed") await ctx.tx.delete(careAsks).where(eq(careAsks.arrangementId, a.id));
       await ctx.tx.delete(careArrangements).where(and(eq(careArrangements.id, a.id), ne(careArrangements.state, "confirmed")));
       await ctx.tx
         .update(careArrangements)

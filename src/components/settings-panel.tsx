@@ -1,11 +1,16 @@
 "use client";
 
+import type { ReachSettings } from "@/server/queries/reach";
+import { CalendarOutSettings, type CalendarOutState } from "./calendar-out";
+import { HelpersSettings } from "./helpers-settings";
+import { ReachSettingsPanel } from "./reach-settings";
 import { useState } from "react";
 import type { WeekView } from "@/server/queries/week";
 import { useApp } from "./app-context";
 import { fmtDateTime } from "./format";
-import { Badge, Button, Card, Dialog, ErrorNote, Field, SectionTitle, inputClass } from "./ui";
+import { Badge, Button, Card, Checkbox, Dialog, ErrorNote, Field, SectionTitle, inputClass } from "./ui";
 import { useCommand } from "./use-command";
+import { CalendarSettings } from "./calendar-settings";
 
 type Child = WeekView["children"][number];
 const AGE_BANDS = ["0-4", "5-7", "8-11", "12-15", "16+"] as const;
@@ -35,20 +40,34 @@ export function SettingsPanel({
   openInvite,
   kids,
   profile,
+  analyticsOptOut,
+  calendars,
+  reach,
+  helpers,
+  calendarOut,
 }: {
   household: WeekView["household"];
   openInvite: WeekView["openInvite"];
   kids: Child[];
   profile: { displayName: string; timeZone: string };
+  analyticsOptOut: boolean;
+  calendars: WeekView["calendars"];
+  reach: ReachSettings;
+  helpers: WeekView["helpers"];
+  calendarOut: CalendarOutState | null;
 }) {
   return (
     <div className="max-w-2xl">
       <h1 className="font-display text-3xl">Settings</h1>
       <Profile profile={profile} />
+      <ReachSettingsPanel settings={reach} />
       <HouseholdDetails household={household} />
       <Adults openInvite={openInvite} />
       <Children kids={kids} />
-      <YourData />
+      <HelpersSettings helpers={helpers} />
+      <CalendarSettings calendars={calendars} />
+      <CalendarOutSettings state={calendarOut} />
+      <YourData analyticsOptOut={analyticsOptOut} />
       <Leaving household={household} />
     </div>
   );
@@ -252,7 +271,10 @@ function ChildEditor({ child, onClose }: { child: Child | null; onClose: () => v
   );
 }
 
-function YourData() {
+function YourData({ analyticsOptOut }: { analyticsOptOut: boolean }) {
+  const app = useApp();
+  const { run, error } = useCommand(app.householdId);
+  const [optOut, setOptOut] = useState(analyticsOptOut);
   return (
     <section>
       <SectionTitle>Your data</SectionTitle>
@@ -262,6 +284,16 @@ function YourData() {
           <a className="inline-flex min-h-11 items-center rounded-full border border-line px-4 text-[15px] hover:bg-surface-2" href="/api/v1/exports?kind=account" download>Download my private data</a>
           <a className="inline-flex min-h-11 items-center rounded-full border border-line px-4 text-[15px] hover:bg-surface-2" href="/api/v1/exports?kind=household" download>Download household data</a>
         </div>
+        <Checkbox
+          checked={!optOut}
+          onChange={async (on) => {
+            setOptOut(!on);
+            if (!(await run("SetAnalyticsOptOut", { optOut: !on }))) setOptOut(optOut);
+          }}
+          label="Count what I do for the household trial"
+          hint="Counts like 'a plan was agreed', with no titles, notes, places or names. Untick to stop recording anything for you."
+        />
+        <ErrorNote message={error?.message} />
       </Card>
     </section>
   );

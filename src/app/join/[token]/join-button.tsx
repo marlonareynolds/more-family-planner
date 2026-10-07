@@ -13,7 +13,7 @@ export function JoinButton({ token }: { token: string }) {
         disabled={pending}
         onClick={async () => {
           const r = await run("JoinHousehold", { token }, { refresh: false });
-          if (r) window.location.href = "/today";
+          if (r) window.location.href = "/welcome";
         }}
       >
         Join

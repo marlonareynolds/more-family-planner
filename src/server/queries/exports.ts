@@ -5,15 +5,21 @@ import {
   accounts,
   careArrangements,
   checkins,
+  trialResponses,
   children,
   events,
   expenses,
   feedback,
+  helpers,
+  jobs,
+  places,
+  highlights,
   holidayPeriods,
   journalEntries,
   moments,
   paymentTransactions,
   preferences,
+  rituals,
 } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import type { Actor } from "../auth";
@@ -28,7 +34,16 @@ import { householdFor } from "./week";
 
 export async function exportAccount(db: Db, actor: Actor) {
   const [account] = await db
-    .select({ displayName: accounts.displayName, timeZone: accounts.timeZone, createdAt: accounts.createdAt })
+    .select({
+      displayName: accounts.displayName,
+      timeZone: accounts.timeZone,
+      email: accounts.email,
+      pushEnabled: accounts.pushEnabled,
+      weeklyEmail: accounts.weeklyEmail,
+      quietStart: accounts.quietStart,
+      quietEnd: accounts.quietEnd,
+      createdAt: accounts.createdAt,
+    })
     .from(accounts)
     .where(eq(accounts.id, actor.accountId));
   return {
@@ -40,6 +55,7 @@ export async function exportAccount(db: Db, actor: Actor) {
       .from(journalEntries)
       .where(and(eq(journalEntries.accountId, actor.accountId), isNull(journalEntries.deletedAt))),
     checkins: await db.select().from(checkins).where(eq(checkins.accountId, actor.accountId)),
+    trialResponses: await db.select().from(trialResponses).where(eq(trialResponses.accountId, actor.accountId)),
     reflections: await db.select().from(feedback).where(eq(feedback.accountId, actor.accountId)),
     preferences: await db.select().from(preferences).where(eq(preferences.accountId, actor.accountId)),
   };
@@ -59,6 +75,8 @@ export async function exportHousehold(db: Db, actor: Actor) {
     .where(and(eq(moments.householdId, household.id), or(eq(moments.sharing, "shared"), eq(moments.organiserId, viewer))));
   const ex = await db.select().from(expenses).where(eq(expenses.householdId, household.id));
   const visibleMomentIds = new Set(ms.map((m) => m.id));
+  const hl = ms.length ? await db.select().from(highlights).where(inArray(highlights.momentId, ms.map((m) => m.id))) : [];
+  const names = new Map((await db.select({ id: accounts.id, name: accounts.displayName }).from(accounts).where(inArray(accounts.id, [...new Set(hl.map((h) => h.accountId))].concat(viewer)))).map((a) => [a.id, a.name]));
   const visibleExpenses = ex.filter((e) => e.sourceType !== "moment" || !e.sourceId || visibleMomentIds.has(e.sourceId));
   return {
     kind: "household",
@@ -86,7 +104,30 @@ export async function exportHousehold(db: Db, actor: Actor) {
       end: m.endAt,
       lifecycle: m.lifecycle,
       budgetMinor: m.budgetMinor,
+      // The family's memories: shared highlights from plans this adult was part of.
+      highlights:
+        !hiddenReason(m, viewer) && (m.participantIds.includes(viewer) || m.kind === "family")
+          ? hl.filter((h) => h.momentId === m.id).map((h) => ({ by: names.get(h.accountId) ?? "Someone", text: h.text, at: h.createdAt }))
+          : [],
     })),
+    rituals: (await db.select().from(rituals).where(eq(rituals.householdId, household.id))).map((r) => ({
+      kind: r.kind,
+      title: r.kind === "me" && r.organiserId !== viewer ? "Time for themselves" : r.title,
+      cadence: r.cadence,
+      startsOn: r.startsOn,
+      startTime: r.startTime,
+      durationMinutes: r.durationMinutes,
+      ended: r.endedAt,
+    })),
+    helpers: await db.select({ name: helpers.name, relation: helpers.relation, phone: helpers.phone }).from(helpers).where(and(eq(helpers.householdId, household.id), isNull(helpers.archivedAt))),
+    jobs: await db
+      .select({ title: jobs.title, notes: jobs.notes, cadence: jobs.cadence, startsOn: jobs.startsOn, ownerId: jobs.ownerId })
+      .from(jobs)
+      .where(and(eq(jobs.householdId, household.id), isNull(jobs.archivedAt))),
+    places: await db
+      .select({ name: places.name, area: places.area, kinds: places.kinds, notes: places.notes, typicalCostMinor: places.typicalCostMinor })
+      .from(places)
+      .where(and(eq(places.householdId, household.id), isNull(places.archivedAt))),
     holidays: await db.select().from(holidayPeriods).where(eq(holidayPeriods.householdId, household.id)),
     care: await db.select().from(careArrangements).where(eq(careArrangements.householdId, household.id)),
     expenses: visibleExpenses,

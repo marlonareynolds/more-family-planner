@@ -2,6 +2,7 @@ import { and, eq, isNull, lte, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { acceptances, careArrangements, memberships, moments, notifications, outbox, preparationTasks } from "@/db/schema";
 import { isAgreed } from "@/domain/moments";
+import { jobStillRelevant } from "./jobs";
 
 /**
  * Drains the transactional outbox (spec 10.1, 13.2). Processing is
@@ -54,6 +55,7 @@ async function stillRelevant(db: Db, p: NotifyPayload): Promise<boolean> {
     const [c] = await db.select().from(careArrangements).where(eq(careArrangements.id, p.sourceId));
     return !!c && c.state === "proposed" && c.version === p.sourceVersion;
   }
+  if (p.sourceType === "job") return jobStillRelevant(db, p);
   if (p.sourceType === "task") {
     const [t] = await db.select().from(preparationTasks).where(eq(preparationTasks.id, p.sourceId));
     return !!t && t.state === "open" && t.ownerId === p.recipientId;

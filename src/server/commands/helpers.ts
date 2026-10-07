@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import type { Tx } from "@/db/client";
+import type { DbOrTx, Tx } from "@/db/client";
 import { accounts, children, memberships, notifications, outbox, reservations } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import { allDayInterval, localToInstant } from "@/domain/time";
@@ -49,7 +49,7 @@ export function resolveSpan(span: SpanInput, timeZone: string): ResolvedSpan {
   return { start, end, localStart, durationMinutes: Math.round((end - start) / 60_000), allDay: false };
 }
 
-export async function currentAdults(tx: Tx, householdId: string): Promise<{ id: string; displayName: string }[]> {
+export async function currentAdults(tx: DbOrTx, householdId: string): Promise<{ id: string; displayName: string }[]> {
   return tx
     .select({ id: accounts.id, displayName: accounts.displayName })
     .from(memberships)

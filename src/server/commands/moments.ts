@@ -1,15 +1,18 @@
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { acceptances, expenses, feedback, moments, preparationTasks } from "@/db/schema";
+import { acceptances, expenses, feedback, highlights, moments, preparationTasks, weekPlans } from "@/db/schema";
 import { findConflicts } from "@/domain/availability";
 import { DomainError } from "@/domain/errors";
 import { isAgreed, materialChanges, type AcceptanceRecord, type MomentFields } from "@/domain/moments";
-import { instantToLocalDate } from "@/domain/time";
+import { instantToLocalDate, isWeekKey } from "@/domain/time";
 import { defineCommand, assertVersion, type CommandContext } from "../pipeline";
 import { loadBusy } from "../queries/busy";
+import { arrangeCare } from "./care";
 import {
   assertPeople,
   currentAdults,
+  currentChildIds,
+  dateString,
   minor,
   queueNotification,
   release,
@@ -28,7 +31,7 @@ import {
 
 type MomentRow = typeof moments.$inferSelect;
 
-const momentFields = z.object({
+export const momentFields = z.object({
   kind: z.enum(["me", "us", "family"]),
   title: requiredText(120, "A title"),
   notes: shortText(2000).default(""),
@@ -42,6 +45,8 @@ const momentFields = z.object({
   travelBeforeMinutes: z.number().int().min(0).max(600).default(0),
   travelAfterMinutes: z.number().int().min(0).max(600).default(0),
   surprise: z.boolean().default(false),
+  /** Family plans: the child whose pick this was. */
+  chosenByChildId: z.uuid().nullable().default(null),
 });
 
 async function loadMoment(ctx: CommandContext, id: string): Promise<MomentRow> {
@@ -135,6 +140,7 @@ export const createMoment = defineCommand({
     }
     if (p.kind === "us" && participants.length !== 2) throw new DomainError("VALIDATION", "A plan for the two of you needs both adults.");
     await assertPeople(ctx, participants, p.childIds);
+    if (p.chosenByChildId) await assertPeople(ctx, [], [p.chosenByChildId]);
     const span = resolveSpan(p.span, ctx.household.timeZone);
     const [m] = await ctx.tx
       .insert(moments)
@@ -155,9 +161,12 @@ export const createMoment = defineCommand({
         needsCare: p.needsCare,
         budgetMinor: p.budgetMinor,
         surprise: p.surprise,
+        chosenByChildId: p.kind === "family" ? p.chosenByChildId : null,
       })
       .returning();
     await ctx.audit("moment.create", "moment", m.id);
+    const [{ n }] = await ctx.tx.select({ n: sql<number>`count(*)::int` }).from(moments).where(eq(moments.householdId, ctx.household.id));
+    if (n === 1) await ctx.track("first_plan_created", p.kind);
     return { momentId: m.id, version: m.version };
   },
 });
@@ -175,6 +184,7 @@ export const editMoment = defineCommand({
     }
     const participants = m.kind === "me" ? m.participantIds : p.fields.participantIds;
     await assertPeople(ctx, participants, p.fields.childIds);
+    if (p.fields.chosenByChildId) await assertPeople(ctx, [], [p.fields.chosenByChildId]);
     const span = resolveSpan(p.fields.span, ctx.household.timeZone);
     const next: MomentFields = {
       ...toFields(m),
@@ -207,6 +217,7 @@ export const editMoment = defineCommand({
         needsCare: next.needsCare,
         budgetMinor: next.budgetMinor,
         surprise: p.fields.surprise,
+        chosenByChildId: m.kind === "family" ? p.fields.chosenByChildId : null,
         version: sql`${moments.version} + 1`,
         ...(material.length ? { materialVersion: sql`${moments.materialVersion} + 1`, review: "current" as const, reviewReason: null } : {}),
       })
@@ -288,6 +299,7 @@ export const shareMoment = defineCommand({
     }
     await ctx.bumpSchedule();
     await ctx.audit("moment.share", "moment", m.id);
+    await ctx.track("moment_shared", m.kind);
     return { momentId: m.id, reserved };
   },
 });
@@ -344,6 +356,7 @@ export const respondToMoment = defineCommand({
     });
     await ctx.bumpSchedule();
     await ctx.audit(`moment.${p.decision}`, "moment", m.id);
+    if (reserved) await ctx.track("moment_agreed", m.kind);
     return { momentId: m.id, reserved };
   },
 });
@@ -408,6 +421,7 @@ export const completeMoment = defineCommand({
     await ctx.tx.update(moments).set({ lifecycle: "completed", version: sql`${moments.version} + 1` }).where(eq(moments.id, m.id));
     await supersedeDeliveries(ctx.tx, m.id);
     await ctx.audit("moment.complete", "moment", m.id);
+    await ctx.track("moment_completed", m.kind);
     return { momentId: m.id };
   },
 });
@@ -503,5 +517,81 @@ export const saveFeedback = defineCommand({
       .values({ accountId: ctx.actor.accountId, momentId, activityKey: m.activityKey ?? `custom:${m.kind}`, ...answers })
       .onConflictDoUpdate({ target: [feedback.accountId, feedback.momentId], set: answers });
     return { saved: true };
+  },
+});
+
+// ── Shared highlights ──────────────────────────────────────────────────────
+
+/**
+ * One line about a plan that happened, for everyone in it (spec 8.10).
+ * Separate from private reflection; saving an empty line removes it.
+ */
+export const saveHighlight = defineCommand({
+  name: "SaveHighlight",
+  scope: "household",
+  payload: z.object({ momentId: z.uuid(), text: shortText(280) }),
+  async handler(ctx, p) {
+    const m = await loadMoment(ctx, p.momentId);
+    if (m.lifecycle !== "completed") throw new DomainError("CONFLICT", "You can add a highlight once the plan has happened.");
+    if (!m.participantIds.includes(ctx.actor.accountId) && m.kind !== "family") throw new DomainError("NOT_FOUND", "That plan could not be found.");
+    if (!p.text) {
+      await ctx.tx.delete(highlights).where(and(eq(highlights.momentId, m.id), eq(highlights.accountId, ctx.actor.accountId)));
+      return { removed: true };
+    }
+    const [h] = await ctx.tx
+      .insert(highlights)
+      .values({ householdId: ctx.household.id, momentId: m.id, accountId: ctx.actor.accountId, text: p.text })
+      .onConflictDoUpdate({ target: [highlights.momentId, highlights.accountId], set: { text: p.text, updatedAt: ctx.now } })
+      .returning();
+    const others = (m.kind === "family" ? (await currentAdults(ctx.tx, ctx.household.id)).map((a) => a.id) : m.participantIds).filter((id) => id !== ctx.actor.accountId);
+    for (const other of others) {
+      await queueNotification(ctx, {
+        recipientId: other,
+        kind: "highlight.added",
+        text: `${ctx.actor.displayName} added a memory to a plan you shared.`,
+        sourceType: "moment",
+        sourceId: m.id,
+        sourceVersion: h.updatedAt.getTime(),
+      });
+    }
+    await ctx.track("highlight_shared", m.kind);
+    return { saved: true };
+  },
+});
+
+// ── The Sunday ten minutes ─────────────────────────────────────────────────
+
+/**
+ * Send a week's worth of plans to the other adult in one go: each becomes an
+ * ordinary shared plan waiting for their answer (spec 3.3, 8.5).
+ */
+export const planWeek = defineCommand({
+  name: "PlanWeek",
+  scope: "household",
+  payload: z.object({
+    weekKey: dateString.refine(isWeekKey, "A week starts on a Monday."),
+    items: z.array(momentFields.extend({ askPartnerToCover: z.boolean().default(false) })).max(8),
+  }),
+  async handler(ctx, p) {
+    const created: string[] = [];
+    for (const { askPartnerToCover, ...item } of p.items) {
+      const c = await createMoment.handler(ctx, item);
+      await shareMoment.handler(ctx, { momentId: c.momentId, version: c.version });
+      created.push(c.momentId);
+      // Me time where the other adult is free: ask them to have the children.
+      if (askPartnerToCover && item.kind === "me") {
+        const partner = (await currentAdults(ctx.tx, ctx.household.id)).find((a) => a.id !== ctx.actor.accountId);
+        const kids = await currentChildIds(ctx.tx, ctx.household.id);
+        if (partner && kids.length) {
+          await arrangeCare.handler(ctx, { kind: "parent", responsibleAccountId: partner.id, providerName: null, childIds: kids, span: item.span, note: "", confirmed: false });
+        }
+      }
+    }
+    await ctx.tx
+      .insert(weekPlans)
+      .values({ householdId: ctx.household.id, weekKey: p.weekKey, accountId: ctx.actor.accountId, items: created.length })
+      .onConflictDoUpdate({ target: [weekPlans.householdId, weekPlans.weekKey, weekPlans.accountId], set: { items: sql`${weekPlans.items} + ${created.length}` } });
+    await ctx.track("week_planned", String(created.length));
+    return { momentIds: created };
   },
 });

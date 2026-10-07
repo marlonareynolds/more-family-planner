@@ -1,9 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces, Inter } from "next/font/google";
+import { Cormorant_Garamond, Figtree, Newsreader, Parisienne } from "next/font/google";
 import "./globals.css";
 
-const sans = Inter({ variable: "--font-sans-face", subsets: ["latin"] });
-const display = Fraunces({ variable: "--font-display-face", subsets: ["latin"], weight: ["500", "600"] });
+const sans = Figtree({ variable: "--font-sans-face", subsets: ["latin"] });
+const display = Newsreader({ variable: "--font-display-face", subsets: ["latin"], style: ["normal", "italic"], axes: ["opsz"] });
+// Only the date night menu uses these, so they load when it is on screen.
+const menu = Cormorant_Garamond({ variable: "--font-menu-face", subsets: ["latin"], weight: ["400", "500", "600"], style: ["normal", "italic"], preload: false });
+const script = Parisienne({ variable: "--font-script-face", subsets: ["latin"], weight: "400", preload: false });
 
 export const metadata: Metadata = {
   title: { default: "More", template: "%s · More" },
@@ -15,14 +18,14 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#faf7f2" },
-    { media: "(prefers-color-scheme: dark)", color: "#171614" },
+    { media: "(prefers-color-scheme: light)", color: "#f3eee4" },
+    { media: "(prefers-color-scheme: dark)", color: "#15171d" },
   ],
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en-GB" className={`${sans.variable} ${display.variable} h-full antialiased`}>
+    <html lang="en-GB" className={`${sans.variable} ${display.variable} ${menu.variable} ${script.variable} h-full antialiased`}>
       <body className="min-h-full">{children}</body>
     </html>
   );

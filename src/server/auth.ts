@@ -18,6 +18,8 @@ export interface Actor {
 export interface Identity {
   subject: string;
   displayName: string;
+  /** Verified by the identity provider; only used for the weekly email. */
+  email?: string;
 }
 
 export type AuthMode = "supabase" | "dev";
@@ -71,11 +73,14 @@ export async function accountFor(db: DbOrTx, identity: Identity): Promise<Actor>
   const [existing] = await db.select().from(accounts).where(eq(accounts.identitySubject, identity.subject));
   if (existing) {
     if (existing.closedAt) throw new DomainError("UNAUTHENTICATED", "This account has been closed.");
+    if (identity.email && identity.email !== existing.email) {
+      await db.update(accounts).set({ email: identity.email }).where(eq(accounts.id, existing.id));
+    }
     return { accountId: existing.id, displayName: existing.displayName };
   }
   const [created] = await db
     .insert(accounts)
-    .values({ identitySubject: identity.subject, displayName: identity.displayName.slice(0, 60) || "You" })
+    .values({ identitySubject: identity.subject, displayName: identity.displayName.slice(0, 60) || "You", email: identity.email ?? null })
     .onConflictDoNothing({ target: accounts.identitySubject })
     .returning();
   if (created) return { accountId: created.id, displayName: created.displayName };
@@ -106,7 +111,7 @@ export async function currentIdentity(): Promise<Identity | null> {
   const { data } = await supabase.auth.getUser();
   if (!data.user) return null;
   const name = (data.user.user_metadata?.full_name as string | undefined) ?? data.user.email?.split("@")[0] ?? "You";
-  return { subject: `supabase:${data.user.id}`, displayName: name };
+  return { subject: `supabase:${data.user.id}`, displayName: name, email: data.user.email ?? undefined };
 }
 
 export async function currentActor(): Promise<Actor | null> {

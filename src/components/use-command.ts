@@ -2,6 +2,36 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
+import { toast } from "./toast";
+
+type Payload = Record<string, unknown> | undefined;
+
+/**
+ * A short confirmation for changes people care about. Quiet by default:
+ * anything not listed here saves without a toast, because the screen
+ * already shows the result.
+ */
+function confirmation(command: string, p: Payload): { text: string; celebrate?: boolean } | null {
+  switch (command) {
+    case "ShareMoment": return { text: "Sent. They'll see it on Today." };
+    case "RespondToMoment":
+      return p?.decision === "accepted" ? { text: "You're in. It's in the diary.", celebrate: true } : { text: "Answer sent." };
+    case "CompleteMoment": return { text: "Lovely. Add a memory while it's fresh.", celebrate: true };
+    case "PlanWeek": return { text: "Your week is planned.", celebrate: true };
+    case "MarkJobDone": return { text: "Done. One less thing.", celebrate: true };
+    case "AnswerJobOwner": return p?.accept ? { text: "It's yours now. Thank you." } : { text: "Answer sent." };
+    case "ProposeJobOwner": return p?.to === "partner" ? { text: "Asked. They'll see it on Today." } : null;
+    case "AddJob": return { text: "Job added." };
+    case "AddPlace": return { text: "Saved to your places." };
+    case "SaveHighlight": return { text: "Memory saved." };
+    case "StartRitual": return { text: "Ritual suggested." };
+    case "JoinRitual": return { text: "You're in. The dates are in the diary.", celebrate: true };
+    case "AddHelper": return { text: "Helper saved." };
+    case "SaveCheckin": return { text: "Check-in saved, just for you." };
+    case "CreateInvite": return null;
+    default: return null;
+  }
+}
 
 export interface ApiError {
   code: string;
@@ -41,6 +71,9 @@ export function useCommand(householdId?: string) {
           return null;
         }
         retryKey.current = null;
+        // Batched calls (refresh: false) confirm once themselves.
+        const note = opts.refresh === false ? null : confirmation(command, payload as Payload);
+        if (note) toast(note.text, { celebrate: note.celebrate });
         if (opts.refresh !== false) router.refresh();
         return data.result as T;
       } catch {

@@ -1,0 +1,30 @@
+name: Reminders and messages
+# Every 15 minutes, nudges the live app to deliver due reminders, phone
+# notifications (outside quiet hours) and the Sunday "week ahead" email.
+# Vercel's free plan only runs its own cron once a day, so this fills the gap.
+# Needs repository secrets MORE_APP_URL (e.g. https://more.example.com) and
+# CRON_SECRET (the same value as in Vercel). Without them the job says so and stops.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: tick
+  cancel-in-progress: false
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      MORE_APP_URL: ${{ secrets.MORE_APP_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - name: Run the tick
+        run: |
+          if [ -z "$MORE_APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::notice::Add MORE_APP_URL and CRON_SECRET repository secrets to switch on timely reminders."
+            exit 0
+          fi
+          curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" "${MORE_APP_URL%/}/api/v1/cron/outbox"

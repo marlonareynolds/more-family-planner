@@ -1,5 +1,6 @@
 "use client";
 
+import { Backpack } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import type { HolidayRow } from "@/server/queries/holidays";
@@ -61,7 +62,7 @@ export function HolidayBoard({ week, holidays, showingArchived }: { week: WeekVi
       </div>
       <ErrorNote message={error?.message} />
       {week.care.length === 0 ? (
-        <EmptyState title="No care needed this week.">Care needs come from school holidays and from plans that need the children looked after.</EmptyState>
+        <EmptyState icon={<Backpack />} tone="family" title="No care needed this week.">Care needs come from school holidays and from plans that need the children looked after.</EmptyState>
       ) : (
         <div className="mt-3 flex flex-col gap-5">
           {week.care.map((day) => (
@@ -104,7 +105,7 @@ export function HolidayBoard({ week, holidays, showingArchived }: { week: WeekVi
         {showingArchived ? "Archived holidays" : "School holidays"}
       </SectionTitle>
       {holidays.length === 0 ? (
-        <EmptyState title={showingArchived ? "Nothing archived." : "No holidays added yet."} />
+        <EmptyState title={showingArchived ? "Nothing archived." : "No holidays added yet."}>{showingArchived ? null : "Add the school terms once and More spots the weeks that need cover."}</EmptyState>
       ) : (
         <ul className="flex flex-col gap-2">
           {holidays.map((h) => (

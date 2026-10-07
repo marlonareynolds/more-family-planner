@@ -1,5 +1,6 @@
 "use client";
 
+import { Sparkles } from "lucide-react";
 import { useState } from "react";
 import { CATALOGUE } from "@/lib/catalogue";
 import type { Guidance } from "@/server/queries/learning";
@@ -28,7 +29,7 @@ export function LearningControls({ guidance }: { guidance: Guidance }) {
       <p className="-mt-2 mb-3 text-sm text-ink-3">Built only from your private feedback. Your partner never sees it, and it only changes your own suggestions.</p>
       <ErrorNote message={error?.message} />
       {guidance.inferred.length === 0 ? (
-        <EmptyState title="Nothing learned yet.">After a plan, a quick reflection helps More suggest better next time.</EmptyState>
+        <EmptyState icon={<Sparkles />} tone="me" title="Nothing learned yet.">After a plan, a quick reflection helps More suggest better next time.</EmptyState>
       ) : (
         <ul className="flex flex-col gap-2">
           {guidance.inferred.map((i) => (

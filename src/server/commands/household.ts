@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   accounts,
   auditEvents,
+  calendarFeeds,
   careArrangements,
   children,
   events,
@@ -12,12 +13,16 @@ import {
   memberships,
   moments,
   preparationTasks,
+  rituals,
 } from "@/db/schema";
 import type { Tx } from "@/db/client";
 import { DomainError } from "@/domain/errors";
 import { isValidTimeZone } from "@/domain/time";
 import { defineCommand, assertVersion, type CommandContext } from "../pipeline";
 import { currentAdults, release, requiredText, supersedeDeliveries } from "./helpers";
+import { disconnectFeed } from "./calendars";
+import { endRitualRow } from "./rituals";
+import { releaseJobsOf } from "./jobs";
 
 /** The supported household shape for this release (spec 3.2, D-02). */
 export const MAX_ADULTS = 2;
@@ -45,6 +50,7 @@ export const createHousehold = defineCommand({
     const [h] = await ctx.tx.insert(households).values({ name: p.name, timeZone: p.timeZone }).returning();
     await ctx.tx.insert(memberships).values({ householdId: h.id, accountId: ctx.actor.accountId });
     await ctx.tx.insert(auditEvents).values({ householdId: h.id, actorId: ctx.actor.accountId, action: "household.create", resourceType: "household", resourceId: h.id, result: "ok" });
+    await ctx.track("household_created", null, h.id);
     return { householdId: h.id };
   },
 });
@@ -138,6 +144,7 @@ export const joinHousehold = defineCommand({
       .where(eq(households.id, h.id));
     // A new partner never inherits old consent (AT-03): acceptance rows are
     // per person and per version, so nothing is carried over.
+    await ctx.track("partner_joined", null, h.id);
     return { householdId: h.id };
   },
 });
@@ -150,6 +157,19 @@ export const joinHousehold = defineCommand({
  */
 async function detachAdult(ctx: CommandContext, accountId: string, reason: string): Promise<void> {
   const { tx, household, now } = ctx;
+
+  // Rituals they're part of stop: nobody else agreed to carry them alone.
+  const theirs = await tx
+    .select({ id: rituals.id })
+    .from(rituals)
+    .where(and(eq(rituals.householdId, household.id), isNull(rituals.endedAt), arrayContains(rituals.participantIds, [accountId])));
+  for (const r of theirs) await endRitualRow(ctx, r.id);
+  // Their household jobs go back to the shared list.
+  await releaseJobsOf(ctx, accountId);
+
+  // Calendar links go with the adult: their imported copies leave too.
+  const feeds = await tx.select({ id: calendarFeeds.id }).from(calendarFeeds).where(and(eq(calendarFeeds.householdId, household.id), eq(calendarFeeds.accountId, accountId)));
+  for (const f of feeds) await disconnectFeed(ctx, f.id);
 
   await tx
     .update(events)

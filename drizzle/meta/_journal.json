@@ -22,6 +22,34 @@
       "when": 1791306809246,
       "tag": "0002_lock_data_api",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791326936865,
+      "tag": "0003_trial_evidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791327396184,
+      "tag": "0004_calendar_import",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791329884776,
+      "tag": "0005_reach_rituals_village",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791361076936,
+      "tag": "0006_jobs_places_calendar_out",
+      "breakpoints": true
     }
   ]
 }
