@@ -33,14 +33,16 @@ interface Draft {
   state: "ready" | "added" | "failed";
 }
 
-function draftOf(p: Proposal, meId: string): Draft {
+function draftOf(p: Proposal, meId: string, hasChildren: boolean): Draft {
+  // A school break needs children to look after; without any yet, it goes in as an all-day diary entry.
+  const kind: ProposalKind = p.kind === "holiday" && !hasChildren ? "event" : p.kind;
   return {
     key: p.key,
     // Optional extras (a donations drop-off, an early finish before a break) are shown but not ticked.
     on: !p.past && p.role !== "optional",
     open: false,
     role: p.role,
-    kind: p.kind,
+    kind,
     title: p.title,
     startDate: p.startDate,
     endDate: p.endDate,
@@ -78,7 +80,7 @@ export function DeskBoard({ ai = false }: { ai?: boolean }) {
     const ctx = { today, children: app.children };
     setReadNote(null);
     if (!ai) {
-      setDrafts(readLetter(text, ctx).map((p) => draftOf(p, app.me.id)));
+      setDrafts(readLetter(text, ctx).map((p) => draftOf(p, app.me.id, app.children.length > 0)));
       return;
     }
     setReading(true);
@@ -90,10 +92,10 @@ export function DeskBoard({ ai = false }: { ai?: boolean }) {
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error?.message ?? "The AI reader couldn't be reached, so this letter was read the simpler way.");
-      setDrafts((body.items as AiItem[]).map((i, n) => draftOf(fromAi(i, n, ctx), app.me.id)));
+      setDrafts((body.items as AiItem[]).map((i, n) => draftOf(fromAi(i, n, ctx), app.me.id, app.children.length > 0)));
     } catch (err) {
       setReadNote(file && !text.trim() ? `${(err as Error).message.replace(/, so this letter was read the simpler way\.$/, ".")} Try again, or paste the letter's text instead.` : (err as Error).message);
-      setDrafts(text.trim() ? readLetter(text, ctx).map((p) => draftOf(p, app.me.id)) : null);
+      setDrafts(text.trim() ? readLetter(text, ctx).map((p) => draftOf(p, app.me.id, app.children.length > 0)) : null);
     } finally {
       setReading(false);
     }
@@ -262,7 +264,7 @@ function fromAi(i: AiItem, n: number, ctx: { today: string; children: { id: stri
     startDate: i.startDate,
     endDate: i.endDate,
     startTime: i.startTime,
-    endTime: i.startTime ? (i.endTime ?? plusMinutes(i.startTime, i.role === "deadline" ? 15 : 60)) : null,
+    endTime: i.startTime ? (i.endTime ?? plusMinutes(i.startTime, i.role === "event" ? 60 : 15)) : null,
     childIds: named.length || i.kind !== "holiday" ? named : ctx.children.map((c) => c.id),
     source: i.quote,
     past: i.endDate < ctx.today,
