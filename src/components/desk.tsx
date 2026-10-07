@@ -3,7 +3,7 @@
 import { Check, Inbox, Lock } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { readLetter, type Proposal, type ProposalKind } from "@/lib/desk-read";
+import { readLetter, type Proposal, type ProposalKind, type ProposalRole } from "@/lib/desk-read";
 import { useApp } from "./app-context";
 import { fmtDate, todayIn } from "./format";
 import { PeoplePicker } from "./people-picker";
@@ -16,6 +16,8 @@ const KIND_LABEL: Record<ProposalKind, string> = { event: "Diary", trip: "Time a
 interface Draft {
   key: string;
   on: boolean;
+  open: boolean;
+  role: ProposalRole;
   kind: ProposalKind;
   title: string;
   startDate: string;
@@ -34,7 +36,10 @@ interface Draft {
 function draftOf(p: Proposal, meId: string): Draft {
   return {
     key: p.key,
-    on: !p.past,
+    // Optional extras (a donations drop-off, an early finish before a break) are shown but not ticked.
+    on: !p.past && p.role !== "optional",
+    open: false,
+    role: p.role,
     kind: p.kind,
     title: p.title,
     startDate: p.startDate,
@@ -67,6 +72,8 @@ export function DeskBoard() {
   const read = () => setDrafts(readLetter(text, { today: todayIn(app.timeZone), children: app.children }).map((p) => draftOf(p, app.me.id)));
   const patch = (key: string, change: Partial<Draft>) => setDrafts((ds) => ds?.map((d) => (d.key === key ? { ...d, ...change } : d)) ?? null);
   const chosen = drafts?.filter((d) => d.on && d.state !== "added") ?? [];
+  const main = drafts?.filter((d) => d.role !== "optional") ?? [];
+  const extras = drafts?.filter((d) => d.role === "optional") ?? [];
 
   async function add() {
     let added = 0;
@@ -118,8 +125,8 @@ export function DeskBoard() {
 
       {drafts && (
         <section aria-live="polite">
-          <SectionTitle hint={drafts.length ? "Change anything that's not right, untick what you don't want, then add." : undefined}>
-            {drafts.length ? `Found ${drafts.length === 1 ? "1 thing" : `${drafts.length} things`}` : "Nothing to add"}
+          <SectionTitle hint={drafts.length ? "Untick what you don't want, change anything that's not right, then add." : undefined}>
+            {main.length ? `Found ${main.length === 1 ? "1 thing" : `${main.length} things`}` : drafts.length ? "Nothing for the diary" : "Nothing to add"}
           </SectionTitle>
           {drafts.length === 0 ? (
             <EmptyState icon={<Inbox />} title="No dates found.">
@@ -129,12 +136,25 @@ export function DeskBoard() {
             <>
               <ErrorNote message={error?.message} />
               <ul className="flex flex-col gap-3">
-                {drafts.map((d) => (
+                {main.map((d) => (
                   <li key={d.key}>
                     <DraftCard d={d} onChange={(change) => patch(d.key, change)} />
                   </li>
                 ))}
               </ul>
+              {extras.length > 0 && (
+                <>
+                  <h3 className="mt-6 text-sm font-medium text-ink-2">Also mentioned</h3>
+                  <p className="mb-2 text-sm text-ink-3">Probably not worth a diary entry, so these aren&apos;t ticked. Tick one if you want it.</p>
+                  <ul className="flex flex-col gap-2">
+                    {extras.map((d) => (
+                      <li key={d.key}>
+                        <DraftCard d={d} onChange={(change) => patch(d.key, change)} />
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <Button variant="primary" disabled={pending || !chosen.length || chosen.some((d) => !valid(d))} onClick={add}>
                   {chosen.length ? `Add ${chosen.length === 1 ? "1 thing" : `${chosen.length} things`}` : "Nothing ticked"}
@@ -167,15 +187,26 @@ function DraftCard({ d, onChange }: { d: Draft; onChange: (change: Partial<Draft
     );
   }
   return (
-    <Card className={cx("flex flex-col gap-3", !d.on && "opacity-70")} tone={d.kind === "holiday" ? "care" : d.kind === "trip" ? "family" : undefined}>
+    <Card className={cx("flex flex-col gap-2", !d.on && "opacity-70")} tone={d.kind === "holiday" ? "care" : d.kind === "trip" ? "family" : undefined}>
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <Checkbox checked={d.on} onChange={(on) => onChange({ on })} label={d.on ? "Add this" : "Leave this out"} hint={d.past ? "This date has passed." : undefined} />
-        <Badge tone={d.kind === "holiday" ? "care" : "neutral"}>{KIND_LABEL[d.kind]}</Badge>
+        <div className="min-w-0">
+          <p className={cx("text-ink", d.role === "event" ? "font-display text-xl leading-snug" : "font-medium")}>{d.title || "Untitled"}</p>
+          <p className="text-sm text-ink-2">{whenOf(d)}</p>
+        </div>
+        <Badge tone={badgeTone(d)}>{badgeOf(d)}</Badge>
       </div>
-      <blockquote className="border-l-2 border-line pl-3 text-sm italic text-ink-3">&ldquo;{d.source}&rdquo;</blockquote>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Checkbox checked={d.on} onChange={(on) => onChange({ on, open: on && d.open })} label={d.on ? "Add this" : "Leave this out"} hint={d.past ? "This date has passed." : undefined} />
+        {d.on && (
+          <Button variant="ghost" size="sm" aria-expanded={d.open} onClick={() => onChange({ open: !d.open })}>
+            {d.open ? "Done" : "Change details"}
+          </Button>
+        )}
+      </div>
       {d.state === "failed" && <p className="text-sm text-bad">This one wasn&apos;t added. Check the details and try again.</p>}
-      {d.on && (
+      {d.on && (d.open || d.state === "failed" || !valid(d)) && (
         <>
+          <blockquote className="border-l-2 border-line pl-3 text-sm italic text-ink-3">&ldquo;{d.source}&rdquo;</blockquote>
           <Segmented label="Add as" value={d.kind} onChange={(kind) => onChange({ kind })} options={(Object.keys(KIND_LABEL) as ProposalKind[]).map((k) => ({ value: k, label: KIND_LABEL[k] }))} />
           <Field label="What">{(id) => <input id={id} className={inputClass} value={d.title} maxLength={80} onChange={(e) => onChange({ title: e.target.value })} />}</Field>
           {d.kind === "event" && <Checkbox checked={d.allDay} onChange={(allDay) => onChange({ allDay })} label="All day" />}
@@ -208,6 +239,32 @@ function DraftCard({ d, onChange }: { d: Draft; onChange: (change: Partial<Draft
       )}
     </Card>
   );
+}
+
+function badgeOf(d: Draft): string {
+  if (d.kind === "holiday") return "School break";
+  if (d.kind === "trip") return KIND_LABEL.trip;
+  if (d.role === "deadline") return "Deadline";
+  if (d.role === "optional") return "Maybe";
+  return "Event";
+}
+
+function badgeTone(d: Draft): "neutral" | "warn" | "care" | "family" | "us" {
+  if (d.kind === "holiday") return "care";
+  if (d.kind === "trip") return "family";
+  if (d.role === "deadline") return "warn";
+  if (d.role === "optional") return "neutral";
+  return "us";
+}
+
+/** "Mon 26 Oct to Fri 30 Oct, all day", "Reminder on Mon 12 Oct at 12:00". */
+function whenOf(d: Draft): string {
+  const days = d.endDate > d.startDate ? `${fmtDate(d.startDate)} to ${fmtDate(d.endDate)}` : fmtDate(d.startDate);
+  if (d.kind === "holiday") return `${days}, all day`;
+  if (d.role === "deadline") return d.allDay ? `Reminder on ${days}` : `Reminder on ${days} at ${d.startTime}`;
+  if (d.kind === "trip") return `${fmtDate(d.startDate)} ${d.startTime} to ${fmtDate(d.endDate)} ${d.endTime}`;
+  if (d.allDay) return `${days}, all day`;
+  return d.endDate > d.startDate ? `${fmtDate(d.startDate)} ${d.startTime} to ${fmtDate(d.endDate)} ${d.endTime}` : `${days}, ${d.startTime} to ${d.endTime}`;
 }
 
 /** The same command the hand-made version would send. */

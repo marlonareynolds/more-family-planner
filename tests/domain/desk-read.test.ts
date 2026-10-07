@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { readLetter } from "@/lib/desk-read";
 
@@ -110,18 +111,52 @@ describe("readLetter: invitations and closures", () => {
   it("titles a bare date line from the heading above it, and turns an RSVP into a reply reminder", () => {
     const items = readLetter("You're invited to Leo's 7th birthday party!\nSaturday 25th October, 2-4pm\nJump Zone, Guildford. RSVP to Kate by 18 Oct", ctx);
     expect(items.map((p) => [p.title, p.startDate, p.startTime, p.endTime])).toEqual([
-      ["You're invited to Leo's 7th birthday party!", "2026-10-25", "14:00", "16:00"],
-      ["Reply: You're invited to Leo's 7th birthday party!", "2026-10-18", null, null],
+      ["You're invited to Leo's 7th birthday party", "2026-10-25", "14:00", "16:00"],
+      ["Reply deadline: You're invited to Leo's 7th birthday party", "2026-10-18", null, null],
     ]);
   });
 
-  it("drops the little words that led into a time", () => {
-    expect(readLetter("Your table at Dishoom is confirmed for Friday 14 November at 7:30pm for 2 people.", ctx)[0].title).toBe("Your table at Dishoom is confirmed for 2 people");
+  it("titles a booking by what it is, without the little words that led into a time", () => {
+    expect(readLetter("Your table at Dishoom is confirmed for Friday 14 November at 7:30pm for 2 people.", ctx)[0].title).toBe("Your table at Dishoom");
   });
 
   it("reads 'closes ... reopens' as the break in between", () => {
     const [p] = readLetter("Christmas holidays: school closes at 1.30pm on Friday 19 December and reopens Monday 5 January.", ctx);
     expect(p).toMatchObject({ kind: "holiday", startDate: "2026-12-20", endDate: "2027-01-04" });
+  });
+});
+
+describe("readLetter: a school newsletter with headings, sessions and deadlines", () => {
+  const OAKFIELD = readFileSync(new URL("../fixtures/oakfield-newsletter.txt", import.meta.url), "utf8");
+  const items = readLetter(OAKFIELD, ctx);
+  const row = (p: (typeof items)[number]) => [p.role, p.kind, p.title, p.startDate, p.endDate, p.startTime, p.endTime];
+
+  it("finds the 16 things a parent would put in the diary, and skips the newsletter's own date", () => {
+    expect(items.filter((p) => p.role !== "optional").map(row)).toEqual([
+      ["event", "event", "Year 4 Trip to the Science Museum", "2026-10-13", "2026-10-13", "08:45", "15:45"],
+      ["event", "event", "Parents’ Evening", "2026-10-14", "2026-10-14", "15:30", "18:30"],
+      ["event", "event", "Parents’ Evening", "2026-10-15", "2026-10-15", "16:00", "19:00"],
+      ["deadline", "event", "Parents’ Evening booking deadline", "2026-10-12", "2026-10-12", "12:00", "12:15"],
+      ["event", "event", "Individual School Photographs", "2026-10-16", "2026-10-16", null, null],
+      ["event", "event", "Sibling photographs", "2026-10-16", "2026-10-16", "08:15", "09:15"],
+      ["event", "event", "Harvest Assembly", "2026-10-19", "2026-10-19", "09:15", "10:00"],
+      ["event", "holiday", "Half-Term", "2026-10-26", "2026-10-30", null, null],
+      ["event", "event", "Children return to school", "2026-11-02", "2026-11-02", "08:45", "09:45"],
+      ["deadline", "event", "Year 6 Secondary School Applications deadline", "2026-10-31", "2026-10-31", null, null],
+      ["event", "event", "Friends of Oakfield Halloween Disco — Reception–Year 2", "2026-10-22", "2026-10-22", "16:30", "17:30"],
+      ["event", "event", "Friends of Oakfield Halloween Disco — Years 3–6", "2026-10-22", "2026-10-22", "18:00", "19:15"],
+      ["deadline", "event", "Friends of Oakfield Halloween Disco ticket deadline", "2026-10-20", "2026-10-20", null, null],
+      ["event", "event", "Flu Vaccinations", "2026-11-04", "2026-11-04", null, null],
+      ["deadline", "event", "Flu Vaccinations consent deadline", "2026-10-28", "2026-10-28", "17:00", "17:15"],
+      ["event", "event", "Christmas Fair", "2026-12-05", "2026-12-05", "11:00", "14:00"],
+    ]);
+  });
+
+  it("notices the food bank and the early finish, but only as optional extras", () => {
+    expect(items.filter((p) => p.role === "optional").map((p) => [p.title, p.startDate, p.startTime])).toEqual([
+      ["Donations for the local food bank", "2026-10-12", null],
+      ["School closes for half-term", "2026-10-23", "15:15"],
+    ]);
   });
 });
 

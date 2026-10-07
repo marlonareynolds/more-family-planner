@@ -8,10 +8,13 @@
  */
 
 export type ProposalKind = "event" | "trip" | "holiday";
+/** An event to go to, a deadline to remember, or something mentioned that is probably not worth a diary entry. */
+export type ProposalRole = "event" | "deadline" | "optional";
 
 export interface Proposal {
   key: string;
   kind: ProposalKind;
+  role: ProposalRole;
   title: string;
   /** Local dates; `endDate` is the last day, inclusive. */
   startDate: string;
@@ -22,7 +25,7 @@ export interface Proposal {
   childIds: string[];
   /** The line of the letter this came from, shown on the card. */
   source: string;
-  /** Before today: shown, but not ticked. */
+  /** Before today: shown, but not ticked. Optional items aren't ticked either. */
   past: boolean;
 }
 
@@ -63,7 +66,6 @@ const SUBJECT_LINE = /^\s*(?:>+\s*)?subject\s*:\s*(?:(?:re|fw|fwd)\s*:\s*)*/i;
 const NOISE_LINE = /^\s*(?:sent from my|get outlook for|-{2,}\s*forwarded message|begin forwarded message|on .+ wrote:$)/i;
 
 const GREETING = /^(?:dear|hi|hello|good (?:morning|afternoon)|thanks|thank you|kind regards|best wishes|regards|yours)\b/i;
-const REPLY_WORDS = /\b(rsvp|reply|respond|let (?:us|me) know|return (?:the|your) .+ by|deadline|book by|pay by|sign up by)\b/i;
 const REOPEN_WORDS = /\b(re-?opens?|returns?|back on|back to school|starts? again)\b/i;
 const HOLIDAY_WORDS = /\b(half[- ]?term|holidays?|inset|training day|school (?:is )?closed|closed to pupils|term ends|break up|bank holiday|strike)\b/i;
 const TRIP_WORDS = /\b(flights?|depart(?:s|ure|ing)?|arriv(?:e|al|ing)|check[- ]?in|check[- ]?out|hotel|boarding|itinerary|outbound|return journey|booking (?:ref|reference|confirmation)|terminal|gate closes)\b/i;
@@ -191,11 +193,6 @@ function addDays(date: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function plusHour(time: string): string {
-  const h = Math.min(+time.slice(0, 2) + 1, 23);
-  return `${pad(h)}:${time.slice(3)}`;
-}
-
 /** What's left of the line once dates and times are taken out. */
 function titleFrom(line: string, cut: { start: number; end: number }[], fallback: string): string {
   let out = "";
@@ -231,35 +228,99 @@ function titleFrom(line: string, cut: { start: number; end: number }[], fallback
   return `${cut80.slice(0, cut80.lastIndexOf(" ") > 40 ? cut80.lastIndexOf(" ") : 79)}…`;
 }
 
-/** The title comes from the sentence the date is in, not the instructions around it. */
-function sentenceTitle(line: string, cut: { start: number; end: number }[], at: number, fallback: string): string {
-  let from = 0;
-  let to = line.length;
-  const ends = /[.!?](?=\s+[A-Z])/g;
-  for (let m = ends.exec(line); m; m = ends.exec(line)) {
-    if (m.index < at) from = m.index + 1;
-    else {
-      to = m.index + 1;
-      break;
-    }
-  }
-  const inside = cut.filter((c) => c.start >= from && c.end <= to).map((c) => ({ start: c.start - from, end: c.end - from }));
-  return titleFrom(line.slice(from, to), inside, fallback);
-}
-
 function childrenIn(text: string, children: ReadContext["children"]): string[] {
   return children
     .filter((c) => c.preferredName.trim().length >= 2 && new RegExp(`\\b${c.preferredName.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text))
     .map((c) => c.id);
 }
 
-function splitLines(text: string): string[] {
-  return text
+interface Sentence {
+  text: string;
+  section: number;
+  heading: string;
+}
+
+const BULLET = /^\s*(?:[*•·▪◦‣-]|\d+[.)])\s+/;
+const GENERIC_HEADING = /^(?:looking ahead|important dates|key dates|dates for (?:your|the) diary|diary dates|reminders?|news|notices|upcoming events?|this week|next week|coming up|other news|and finally)$/i;
+const DEADLINE_WORDS = /\b(deadline|closing date|no later than|rsvp|must be \w+(?: \w+)? by|please\b[^.]{0,60}?\bby|(?:book|booked|pay|paid|return|returned|complete|completed|purchase|purchased|submit|submitted|sign up|register|reply|respond|order|ordered)\b[^.]{0,40}?\bby)\b/i;
+const DEADLINE_NOUNS: [RegExp, string][] = [
+  [/\b(rsvp|reply|respond)/i, "reply"],
+  [/\bconsent/i, "consent"],
+  [/\btickets?\b/i, "ticket"],
+  [/\bapplications?\b|\bapply\b/i, "application"],
+  [/\bbook(?:ing|ed)?\b|\bslots?\b|\bappointments?\b/i, "booking"],
+  [/\bpay(?:ment|ments)?\b|\bpaid\b/i, "payment"],
+  [/\bregist(?:er|ration)\b|\bsign up\b/i, "registration"],
+  [/\border(?:s|ed)?\b/i, "order"],
+  [/\bforms?\b/i, "form"],
+];
+const OPEN_ENDED = /\b(any ?time from|from\b[^.]*\bonwards|onwards from|until further notice)\b/i;
+const CLOSING = /\bclos(?:e|es|ing)\b/i;
+// Undated lines that only add a time to the item before them.
+const START_HINT = /\b(arriv\w*|start\w*|begin\w*|doors)\b/i;
+const END_HINT = /\b(finish\w*|end(?:s|ing)?|return\w*|collect\w*|pick(?:ing)? ?up|until|over by)\b/i;
+const HINT_WORDS = /\b(doors|arriv\w*|collect\w*|pick(?:ing)? ?up|drop(?:ping)? ?off|finish\w*|return\w*|end(?:s|ing)?|open\w*|over by)\b/i;
+// "Sibling photographs will be taken from 8:15am": the subject of a sentence.
+const SUBJECT = /^(?:our |the |a |an |this |next )?(.{3,60}?)\s+(?:will|is|are|must|should|can|takes? place|start|starts|begin|begins|run|runs)\b/i;
+const NOT_A_SUBJECT = /^(?:we|you|it|they|this|that|there|children|pupils|students|families|parents|everyone|all|please|doors)\b/i;
+// "Reception–Year 2: 4:30pm–5:30pm": one session of the event above.
+const SESSION = /^([^:]{2,40}):\s*(?=\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?\s*(?:-|–|—|to)\s*\d)/i;
+
+function capital(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function isHeading(line: string): boolean {
+  if (line.length > 60 || GREETING.test(line) || BULLET.test(line)) return false;
+  if (/[.?:,;]$/.test(line)) return false;
+  return line.split(/\s+/).length <= 9;
+}
+
+/** Lines become sentences, each knowing the heading it sits under. */
+function sentencesOf(text: string, today: string): Sentence[] {
+  const lines = text
     .replace(/\r/g, "")
     .split(/\n+/)
-    .flatMap((l) => (l.length > 160 ? l.split(/(?<=[.!?])\s+(?=[A-Z])/) : [l]))
     .map((l) => l.replace(/^\s*>+\s?/, "").trim())
     .filter(Boolean);
+  const greetingAt = lines.findIndex((l) => GREETING.test(l));
+  const out: Sentence[] = [];
+  // An email's subject is only a last resort for a title, so it doesn't start as a heading.
+  let heading = "";
+  let section = 0;
+  lines.forEach((raw, i) => {
+    if (HEADER_LINE.test(raw) || SUBJECT_LINE.test(raw) || NOISE_LINE.test(raw)) return;
+    const dated = findDates(raw, today).length > 0;
+    // The letter's own date ("Weekly newsletter, Friday 9 October") is not an event.
+    if (dated && ((greetingAt > 0 && i < greetingAt) || /\b(newsletter|bulletin)\b/i.test(raw))) return;
+    if (!dated && findTimes(raw).length === 0 && isHeading(raw)) {
+      heading = raw.replace(/[!\s]+$/, "");
+      section++;
+      return;
+    }
+    const line = raw.replace(BULLET, "");
+    for (const text of line.split(/(?<=[.!?])\s+(?=[A-Z"“‘'(])/)) if (text.trim()) out.push({ text: text.trim(), section, heading });
+  });
+  return out;
+}
+
+function subjectOf(sentence: string): string | null {
+  const m = SUBJECT.exec(sentence);
+  if (!m || NOT_A_SUBJECT.test(m[1])) return null;
+  return capital(m[1].replace(/[,;:]+$/, "").trim());
+}
+
+function deadlineTitle(sentence: string, base: string): string {
+  const noun = DEADLINE_NOUNS.find(([re]) => re.test(sentence))?.[1] ?? null;
+  if (noun === "reply") return `Reply deadline: ${base}`;
+  if (!noun || new RegExp(`\\b${noun.slice(0, 5)}`, "i").test(base)) return `${base} deadline`;
+  return `${base} ${noun} deadline`;
+}
+
+function sameDayEnd(start: string, end: string | undefined, minutes: number): string {
+  if (end && end > start) return end;
+  const total = Math.min(+start.slice(0, 2) * 60 + +start.slice(3) + minutes, 23 * 60 + 59);
+  return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
 }
 
 /**
@@ -267,29 +328,73 @@ function splitLines(text: string): string[] {
  * the same text and day always give the same proposals.
  */
 export function readLetter(text: string, ctx: ReadContext): Proposal[] {
-  const lines = splitLines(text.slice(0, 20_000));
-  const subject = lines.find((l) => SUBJECT_LINE.test(l))?.replace(SUBJECT_LINE, "").trim() ?? "";
-  const letterChildren = childrenIn(text, ctx.children);
-  const isTrip = TRIP_WORDS.test(text);
-  const out: Proposal[] = [];
-  let heading = subject;
+  const body = text.slice(0, 20_000);
+  const sentences = sentencesOf(body, ctx.today);
+  const subject = body.split(/\n/).find((l) => SUBJECT_LINE.test(l))?.replace(SUBJECT_LINE, "").trim() ?? "";
+  const letterChildren = childrenIn(body, ctx.children);
+  const isTrip = TRIP_WORDS.test(body);
+  const out: (Proposal & { section: number; explicitEnd: boolean; sessions: number })[] = [];
+  const headingUsed = new Set<number>();
 
-  for (const line of lines) {
-    if (HEADER_LINE.test(line) || SUBJECT_LINE.test(line) || NOISE_LINE.test(line)) continue;
+  const push = (p: Omit<Proposal, "key" | "childIds" | "past"> & { section: number; explicitEnd: boolean }, sentence: string) => {
+    const lineChildren = childrenIn(sentence, ctx.children);
+    out.push({
+      ...p,
+      key: "",
+      sessions: 0,
+      childIds: lineChildren.length ? lineChildren : p.kind === "holiday" ? (letterChildren.length ? letterChildren : ctx.children.map((c) => c.id)) : letterChildren,
+      source: sentence.length > 240 ? `${sentence.slice(0, 239)}…` : sentence,
+      past: p.endDate < ctx.today,
+    });
+  };
+
+  for (const s of sentences) {
+    const line = s.text;
     const dates = findDates(line, ctx.today);
+    const times = findTimes(line);
+    const heading = s.heading && !GENERIC_HEADING.test(s.heading) ? s.heading : "";
+    const last = out.at(-1);
+    const sameSection = last && last.section === s.section && last.role === "event" && last.kind === "event";
+
     if (!dates.length) {
-      // A short undated line is likely a heading for what follows.
-      if (line.length <= 80 && !GREETING.test(line)) heading = titleFrom(line, [], line);
+      if (!sameSection || !times.length) continue;
+      // A session of the event above: "Years 3–6: 6:00pm–7:15pm".
+      const session = SESSION.exec(line);
+      if (session && times.length >= 2) {
+        const parent = out.filter((p) => p.section === s.section && p.role === "event").at(0)!;
+        parent.sessions++;
+        push({ kind: "event", role: "event", title: `${parent.title} — ${session[1].trim()}`, startDate: parent.startDate, endDate: parent.endDate, startTime: times[0].time, endTime: times[1].time, source: line, section: s.section, explicitEnd: true }, line);
+        continue;
+      }
+      // Another thing on the same day: "Sibling photographs will be taken from 8:15am".
+      const who = subjectOf(line);
+      if (who && !HINT_WORDS.test(line)) {
+        push({ kind: "event", role: "event", title: who, startDate: last.startDate, endDate: last.endDate, startTime: times[0].time, endTime: sameDayEnd(times[0].time, times[1]?.time, 60), source: line, section: s.section, explicitEnd: !!times[1] }, line);
+        continue;
+      }
+      // A time for the item above: "arrive at 8:45am and return by 3:45pm", "finish by 10:00am".
+      if (!last.startTime && START_HINT.test(line)) {
+        last.startTime = times[0].time;
+        last.endTime = sameDayEnd(times[0].time, times[1]?.time, 60);
+        last.explicitEnd = !!times[1];
+        last.source = `${last.source} ${line}`;
+      } else if (last.startTime && !last.explicitEnd && END_HINT.test(line)) {
+        const end = times.at(-1)!.time;
+        if (end > last.startTime) {
+          last.endTime = end;
+          last.explicitEnd = true;
+          last.source = `${last.source} ${line}`;
+        }
+      }
       continue;
     }
-    const times = findTimes(line);
-    const cut = [...dates, ...times];
+
     // Two dates joined by "to" or "-" are one span.
     const spans: { from: string; to: string; at: number }[] = [];
     // "Closes on Friday 19 December and reopens on Monday 5 January": the break is the days between.
-    const closing = HOLIDAY_WORDS.test(line) && REOPEN_WORDS.test(line) && dates.length === 2 && !dates[0].rangeTo && daysBetween(dates[0].date, dates[1].date) >= 2 && daysBetween(dates[0].date, dates[1].date) <= 60;
-    if (closing) spans.push({ from: addDays(dates[0].date, 1), to: addDays(dates[1].date, -1), at: dates[0].start });
-    for (let i = 0; i < (closing ? 0 : dates.length); i++) {
+    const closingSpan = HOLIDAY_WORDS.test(line) && REOPEN_WORDS.test(line) && dates.length === 2 && !dates[0].rangeTo && daysBetween(dates[0].date, dates[1].date) >= 2 && daysBetween(dates[0].date, dates[1].date) <= 60;
+    if (closingSpan) spans.push({ from: addDays(dates[0].date, 1), to: addDays(dates[1].date, -1), at: dates[0].start });
+    for (let i = 0; i < (closingSpan ? 0 : dates.length); i++) {
       const d = dates[i];
       if (d.rangeTo) {
         spans.push({ from: d.date, to: d.rangeTo, at: d.start });
@@ -303,32 +408,39 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
         spans.push({ from: d.date, to: d.date, at: d.start });
       }
     }
-    const lineChildren = childrenIn(line, ctx.children);
-    for (const s of spans) {
-      const reply = REPLY_WORDS.test(line) && s.from === s.to;
-      const kind: ProposalKind = reply ? "event" : isTrip && TRIP_WORDS.test(line) ? "trip" : HOLIDAY_WORDS.test(line) ? "holiday" : "event";
-      const timed = kind !== "holiday" && !reply && times.length > 0;
+    const cut = [...dates, ...times];
+    const cleaned = titleFrom(line, cut, "");
+    const named = subjectOf(line);
+
+    for (const span of spans) {
+      const single = span.from === span.to;
+      const deadline = single && DEADLINE_WORDS.test(line);
+      // "School will close for half-term at 3:15pm on Friday 23 October" repeats the break; "any time from Monday" has no event.
+      const optional = !deadline && ((single && OPEN_ENDED.test(line)) || (single && CLOSING.test(line) && HOLIDAY_WORDS.test(line) && times.length > 0 && !REOPEN_WORDS.test(line)));
+      const kind: ProposalKind = deadline || optional ? "event" : isTrip && TRIP_WORDS.test(line) ? "trip" : HOLIDAY_WORDS.test(line) || /\bno school\b/i.test(line) ? "holiday" : "event";
+      const role: ProposalRole = deadline ? "deadline" : optional ? "optional" : "event";
+
+      let title: string;
+      if (deadline) title = deadlineTitle(line, heading || named || cleaned || "Reply");
+      else if (optional && CLOSING.test(line) && HOLIDAY_WORDS.test(line)) title = `School closes for ${(line.match(HOLIDAY_WORDS)?.[0] ?? "the break").toLowerCase()}`;
+      else if (optional) title = named ?? (cleaned || heading || "From the letter");
+      else if (heading && !headingUsed.has(s.section)) title = heading;
+      else if (heading && !named && cleaned.length < 4) title = heading;
+      else title = named ?? (cleaned || heading || subject || "From the letter");
+      if (role === "event" && heading && title === heading) headingUsed.add(s.section);
+
+      const timed = kind !== "holiday" && times.length > 0;
       const startTime = timed ? times[0].time : null;
-      let endTime = timed ? (times[1]?.time ?? plusHour(times[0].time)) : null;
-      if (startTime && endTime && s.from === s.to && endTime <= startTime) endTime = plusHour(startTime);
-      out.push({
-        key: "",
-        kind,
-        title: reply ? titleFrom(`Reply: ${heading || sentenceTitle(line, cut, s.at, "the letter")}`, [], "Reply") : sentenceTitle(line, cut, s.at, heading || "From the letter"),
-        startDate: s.from,
-        endDate: s.to,
-        startTime,
-        endTime,
-        childIds: lineChildren.length ? lineChildren : kind === "holiday" ? (letterChildren.length ? letterChildren : ctx.children.map((c) => c.id)) : letterChildren,
-        source: line.length > 240 ? `${line.slice(0, 239)}…` : line,
-        past: s.to < ctx.today,
-      });
+      const endTime = startTime ? sameDayEnd(startTime, single ? times[1]?.time : (times[1]?.time ?? startTime), deadline ? 15 : 60) : null;
+      push({ kind, role, title: titleFrom(title, [], title), startDate: span.from, endDate: span.to, startTime, endTime, source: line, section: s.section, explicitEnd: !!times[1] }, line);
     }
   }
 
+  // An event split into sessions is the sessions, not the umbrella line.
+  let result: Proposal[] = out.filter((p) => !(p.sessions > 0 && p.startTime === null));
+
   // A booking's outward and return legs are one trip.
-  const legs = out.filter((p) => p.kind === "trip");
-  let result = out;
+  const legs = result.filter((p) => p.kind === "trip");
   if (legs.length > 1) {
     const first = legs.reduce((a, b) => (`${b.startDate}${b.startTime ?? ""}` < `${a.startDate}${a.startTime ?? ""}` ? b : a));
     const last = legs.reduce((a, b) => (`${b.endDate}${b.endTime ?? ""}` > `${a.endDate}${a.endTime ?? ""}` ? b : a));
@@ -340,7 +452,7 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
       source: legs.map((l) => l.source).join(" … "),
       past: last.endDate < ctx.today,
     };
-    result = [trip, ...out.filter((p) => p.kind !== "trip")];
+    result = [trip, ...result.filter((p) => p.kind !== "trip")];
   }
 
   // The same thing mentioned twice is one item.
@@ -352,5 +464,17 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
       seen.add(id);
       return true;
     })
-    .map((p, i) => ({ ...p, key: `p${i}` }));
+    .map((p, i) => ({
+      kind: p.kind,
+      role: p.role,
+      title: p.title,
+      startDate: p.startDate,
+      endDate: p.endDate,
+      startTime: p.startTime,
+      endTime: p.endTime,
+      childIds: p.childIds,
+      source: p.source,
+      past: p.past,
+      key: `p${i}`,
+    }));
 }
