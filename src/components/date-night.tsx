@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { SuggestedTime } from "@/domain/free-time";
+import { placeKey } from "@/lib/places";
+import { BookingLinks } from "./booking-links";
 import { BUDGETS, COURSE_HINT, COURSE_LABEL, DATE_NIGHT_KEY, MOODS, MOOD_MINUTES, composeMenu, menuToNotes, startWindow, type Budget, type Course, type Menu, type Mood, type Timing } from "@/lib/date-night";
 import type { FreeTimes } from "@/server/queries/free-time";
 import { useApp } from "./app-context";
@@ -140,6 +142,9 @@ export function DateNightConcierge() {
     };
   }, [mood, timing, partner]);
 
+  // When the main course is one of your places, its own booking page comes first.
+  const mainPlace = menu?.location ? app.places.find((p) => menu.location!.startsWith(p.name)) : undefined;
+
   function chooseMood(m: Mood) {
     setMood(m);
     setEdits({});
@@ -249,6 +254,11 @@ export function DateNightConcierge() {
                 onChange={(m) => setEdits(m)}
                 onShuffle={(c) => { setTurns({ ...turns, [c]: (turns[c] ?? 0) + 1 }); setEdits((e) => Object.fromEntries(Object.entries(e).filter(([k]) => k !== c))); }}
               />
+            )}
+            {mood === "out" && (
+              <div className="mt-3 text-[1.02rem] italic">
+                <BookingLinks activityKey={mainPlace ? placeKey(mainPlace.id) : null} category="food" setting="out-indoors" start={slot?.start} people={2} />
+              </div>
             )}
           </Step>
 

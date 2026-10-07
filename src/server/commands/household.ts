@@ -6,7 +6,9 @@ import {
   auditEvents,
   calendarFeeds,
   careArrangements,
+  childWishes,
   children,
+  displayLinks,
   events,
   households,
   invitations,
@@ -19,7 +21,8 @@ import type { Tx } from "@/db/client";
 import { DomainError } from "@/domain/errors";
 import { isValidTimeZone } from "@/domain/time";
 import { defineCommand, assertVersion, type CommandContext } from "../pipeline";
-import { currentAdults, release, requiredText, supersedeDeliveries } from "./helpers";
+import { currentAdults, release, requiredText, shortText, supersedeDeliveries } from "./helpers";
+import { clearForecast } from "../weather";
 import { disconnectFeed } from "./calendars";
 import { endRitualRow } from "./rituals";
 import { releaseJobsOf } from "./jobs";
@@ -68,6 +71,31 @@ export const updateHousehold = defineCommand({
     if (p.timeZone !== ctx.household.timeZone) await ctx.bumpSchedule();
     await ctx.audit("household.update", "household", ctx.household.id);
     return { householdId: ctx.household.id };
+  },
+});
+
+/**
+ * The household's town, for the forecast and "near you" links. Only a place
+ * name and rounded coordinates are kept; clearing it forgets the forecast.
+ */
+export const setHouseholdLocation = defineCommand({
+  name: "SetHouseholdLocation",
+  scope: "household",
+  payload: z.object({
+    placeName: shortText(80).nullable(),
+    latitude: z.number().min(-90).max(90).nullable(),
+    longitude: z.number().min(-180).max(180).nullable(),
+  }),
+  async handler(ctx, p) {
+    const set = p.placeName && p.latitude !== null && p.longitude !== null;
+    const round = (n: number) => Math.round(n * 100) / 100;
+    await ctx.tx
+      .update(households)
+      .set(set ? { placeName: p.placeName, latitude: round(p.latitude!), longitude: round(p.longitude!), version: sql`${households.version} + 1` } : { placeName: null, latitude: null, longitude: null, version: sql`${households.version} + 1` })
+      .where(eq(households.id, ctx.household.id));
+    await clearForecast(ctx.tx, ctx.household.id);
+    await ctx.audit("household.location", "household", ctx.household.id);
+    return { placeName: set ? p.placeName : null };
   },
 });
 
@@ -311,6 +339,9 @@ export const archiveChild = defineCommand({
     const [row] = await ctx.tx.select().from(children).where(and(eq(children.id, p.childId), eq(children.householdId, ctx.household.id)));
     assertVersion(row, p.version, "This child's details");
     await ctx.tx.update(children).set({ archivedAt: ctx.now, version: sql`${children.version} + 1` }).where(eq(children.id, p.childId));
+    // Their own screen stops working, and any pick they left is put aside.
+    await ctx.tx.update(displayLinks).set({ revokedAt: ctx.now }).where(and(eq(displayLinks.childId, p.childId), isNull(displayLinks.revokedAt)));
+    await ctx.tx.update(childWishes).set({ handledAt: ctx.now }).where(and(eq(childWishes.childId, p.childId), isNull(childWishes.handledAt)));
     await ctx.bumpSchedule();
     return { childId: p.childId };
   },

@@ -6,6 +6,7 @@ import { accounts } from "@/db/schema";
 import { loadRange } from "@/server/page-data";
 import { PROVIDERS, providerReady } from "@/server/calendar-providers";
 import { calendarLinkFor } from "@/server/queries/calendar-out";
+import { screenLinksFor } from "@/server/queries/display";
 import { reachFor } from "@/server/queries/reach";
 
 export const metadata = { title: "Settings" };
@@ -27,6 +28,8 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
         reach={await reachFor(db, actor)}
         helpers={view.helpers}
         calendarOut={await calendarLinkFor(db, actor)}
+        screens={await screenLinksFor(db, view.household.id)}
+        placeName={view.place?.name ?? null}
       />
     </AppProvider>
   );

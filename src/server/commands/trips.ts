@@ -4,6 +4,7 @@ import { trips } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import { localToInstantCompatible } from "@/domain/time";
 import { defineCommand, assertVersion, type CommandContext } from "../pipeline";
+import { assertOwnTimeRespected } from "./me-guard";
 import { assertPeople, currentAdults, dateString, queueNotification, requiredText, shortText, timeString } from "./helpers";
 
 /**
@@ -47,6 +48,7 @@ export const addTrip = defineCommand({
   async handler(ctx, p) {
     await assertPeople(ctx, p.travellerIds, p.childIds);
     const span = spanOf(p, ctx.household.timeZone);
+    await assertOwnTimeRespected(ctx, p.travellerIds, [{ start: span.startAt.getTime(), end: span.endAt.getTime() }]);
     const [row] = await ctx.tx
       .insert(trips)
       .values({ householdId: ctx.household.id, organiserId: ctx.actor.accountId, kind: p.kind, title: p.title, destination: p.destination, ...span, travellerIds: [...new Set(p.travellerIds)], childIds: [...new Set(p.childIds)] })
@@ -67,6 +69,8 @@ export const updateTrip = defineCommand({
     assertVersion(row, p.version, "This trip");
     await assertPeople(ctx, p.travellerIds, p.childIds);
     const span = spanOf(p, ctx.household.timeZone);
+    const moved = span.startAt.getTime() !== row.startAt.getTime() || span.endAt.getTime() !== row.endAt.getTime();
+    await assertOwnTimeRespected(ctx, p.travellerIds.filter((id) => moved || !row.travellerIds.includes(id)), [{ start: span.startAt.getTime(), end: span.endAt.getTime() }]);
     await ctx.tx
       .update(trips)
       .set({ kind: p.kind, title: p.title, destination: p.destination, ...span, travellerIds: [...new Set(p.travellerIds)], childIds: [...new Set(p.childIds)], version: sql`${trips.version} + 1` })

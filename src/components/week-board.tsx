@@ -1,5 +1,4 @@
 "use client";
-
 import { ArrowRight, Backpack, Cake, CalendarDays, Heart, Leaf, Plus, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -10,6 +9,7 @@ import { EventEditor } from "./event-editor";
 import { MomentCard } from "./moment-card";
 import { MomentEditor, type MomentKind } from "./moment-editor";
 import { Badge, Button, Dialog, Segmented, cx } from "./ui";
+import { WeatherGlyph, weatherText } from "./weather";
 
 const CHOICE = "flex min-h-14 items-center gap-3 rounded-2xl border border-line px-3 text-left text-[15px] transition-colors hover:bg-surface-2 active:scale-[0.99]";
 
@@ -94,6 +94,7 @@ export function WeekBoard({ week, mode = "week", freeTogether = {} }: { week: We
                   {date === today ? "Today · " : ""}
                   {fmtDate(date)}
                   {week.markers[date] && <span className="ml-2 rounded-full bg-family-soft px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-family">{week.markers[date]}</span>}
+                  {week.weather?.[date] && <span className="ml-2 inline-flex items-center gap-1 align-middle text-[12px] font-medium normal-case tracking-normal text-ink-3" title={weatherText(week.weather[date])}><WeatherGlyph w={week.weather[date]} size={14} />{week.weather[date].high}°</span>}
                   <AwayChips trips={week.trips} date={date} />
                 </h2>
                 <span className="flex items-center gap-2 text-sm text-ink-3">
@@ -110,6 +111,7 @@ export function WeekBoard({ week, mode = "week", freeTogether = {} }: { week: We
                   {date === today ? "Today · " : ""}
                   {fmtDate(date)}
                   {week.markers[date] && <span className="ml-2 rounded-full bg-family-soft px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-family">{week.markers[date]}</span>}
+                  {week.weather?.[date] && <span className="ml-2 inline-flex items-center gap-1 align-middle text-[12px] font-medium normal-case tracking-normal text-ink-3" title={weatherText(week.weather[date])}><WeatherGlyph w={week.weather[date]} size={14} />{week.weather[date].high}°</span>}
                   <AwayChips trips={week.trips} date={date} />
                 </h2>
                 {mode === "week" && view === "agenda" && (

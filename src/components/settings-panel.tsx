@@ -11,6 +11,7 @@ import { fmtDateTime } from "./format";
 import { Badge, Button, Card, Checkbox, Dialog, ErrorNote, Field, SectionTitle, inputClass } from "./ui";
 import { useCommand } from "./use-command";
 import { CalendarSettings, type CalendarConnect } from "./calendar-settings";
+import { FamilyScreens, TownSettings, type ScreenLink } from "./family-screens";
 
 type Child = WeekView["children"][number];
 const AGE_BANDS = ["0-4", "5-7", "8-11", "12-15", "16+"] as const;
@@ -46,6 +47,8 @@ export function SettingsPanel({
   reach,
   helpers,
   calendarOut,
+  screens,
+  placeName,
 }: {
   household: WeekView["household"];
   openInvite: WeekView["openInvite"];
@@ -57,6 +60,8 @@ export function SettingsPanel({
   reach: ReachSettings;
   helpers: WeekView["helpers"];
   calendarOut: CalendarOutState | null;
+  screens: ScreenLink[];
+  placeName: string | null;
 }) {
   return (
     <div className="max-w-2xl">
@@ -64,9 +69,11 @@ export function SettingsPanel({
       <Profile profile={profile} />
       <ReachSettingsPanel settings={reach} />
       <HouseholdDetails household={household} />
+      <TownSettings placeName={placeName} />
       <Adults openInvite={openInvite} />
       <Children kids={kids} />
       <HelpersSettings helpers={helpers} />
+      <FamilyScreens links={screens} />
       <CalendarSettings calendars={calendars} connect={calendarConnect} />
       <CalendarOutSettings state={calendarOut} />
       <YourData analyticsOptOut={analyticsOptOut} />

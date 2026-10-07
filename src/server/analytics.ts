@@ -30,6 +30,9 @@ export const PRODUCT_EVENT_TYPES = [
   "job_handed_over",
   "place_added",
   "calendar_linked",
+  "weather_swap",
+  "display_linked",
+  "child_wish",
 ] as const;
 export type ProductEventType = (typeof PRODUCT_EVENT_TYPES)[number];
 

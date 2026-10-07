@@ -11,6 +11,8 @@ export interface AppInfo {
   children: { id: string; preferredName: string; ageBand: string; needs: string; version: number }[];
   helpers: { id: string; name: string; phone: string }[];
   places: PlaceView[];
+  /** The household's town, for "near you" links. */
+  placeName: string | null;
 }
 
 export function infoFrom(w: WeekView): AppInfo {
@@ -24,6 +26,7 @@ export function infoFrom(w: WeekView): AppInfo {
     children: w.children,
     helpers: w.helpers.map((h) => ({ id: h.id, name: h.name, phone: h.phone })),
     places: w.places,
+    placeName: w.place?.name ?? null,
   };
 }
 

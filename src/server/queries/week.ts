@@ -1,5 +1,5 @@
-import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
-import type { Db } from "@/db/client";
+import { and, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import type { Db, DbOrTx } from "@/db/client";
 import {
   acceptances,
   accounts,
@@ -7,6 +7,7 @@ import {
   careArrangements,
   careRequirements,
   checkins,
+  childWishes,
   children,
   expenses,
   feedback,
@@ -26,6 +27,7 @@ import { cadenceLabel } from "@/domain/rituals";
 import { planningWeekKey } from "@/domain/reach";
 import { canSeeDetails, findConflicts, type Busy } from "@/domain/availability";
 import { coverageFor, groupCoverage, type CareArrangement, type CoverageState } from "@/domain/care";
+import { whenPhrase } from "@/domain/discreet";
 import { DomainError } from "@/domain/errors";
 import type { Interval } from "@/domain/intervals";
 import { summarise, type ExpenseSummary } from "@/domain/money";
@@ -38,6 +40,10 @@ import { loadBusy, loadEventOccurrences, loadTrips } from "./busy";
 import { tripCareNeeds } from "@/domain/trips";
 import { STALE_AFTER_MS } from "../calendar-sync";
 import { bankHoliday } from "@/lib/bank-holidays";
+import { CATALOGUE } from "@/lib/catalogue";
+import { placeActivities } from "@/lib/places";
+import { dayWeather, isWet, rainDuring, swapOptions, type DayWeather, type SwapOption } from "@/domain/weather";
+import { activityFor, forecastFor } from "../weather";
 
 /**
  * The viewer-specific week projection (spec 12.2 GET /weeks/{weekKey}).
@@ -198,7 +204,7 @@ export interface AttentionItem {
   key: string;
   priority: number;
   text: string;
-  action: "respond" | "review" | "task" | "care" | "care-gap" | "reflect" | "complete" | "checkin" | "invite" | "calendar" | "date-ahead" | "ritual" | "plan-week";
+  action: "respond" | "review" | "task" | "care" | "care-gap" | "reflect" | "complete" | "checkin" | "invite" | "calendar" | "date-ahead" | "ritual" | "plan-week" | "me-clash" | "weather" | "wish";
   targetId?: string;
   date?: string;
 }
@@ -240,6 +246,22 @@ export interface WeekView {
   /** Time away overlapping this view, and the next family trip ahead. */
   trips: TripView[];
   nextFamilyTrip: TripView | null;
+  /** The household's town, if set, for the forecast and "near you" links. */
+  place: { name: string } | null;
+  /** The forecast for each day in view that it reaches. */
+  weather: Record<string, DayWeather>;
+  /** Outdoor plans this viewer is part of where rain is likely, with indoor swaps. */
+  wetPlans: WetPlan[];
+  /** Picks children made on their own screen, waiting for an adult. */
+  wishes: { id: string; childId: string; title: string; activityKey: string; createdAt: string }[];
+  /** The child whose turn it is to choose a family plan: whoever chose least recently. */
+  turnToChoose: string | null;
+}
+
+export interface WetPlan {
+  momentId: string;
+  chance: number;
+  swaps: SwapOption[];
 }
 
 export interface TripView {
@@ -641,7 +663,32 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
   const [plan] = await db.select({ k: weekPlans.weekKey }).from(weekPlans).where(and(eq(weekPlans.householdId, household.id), eq(weekPlans.weekKey, planningKey))).limit(1);
   const planning = { weekKey: planningKey, planned: !!plan };
 
-  const attention = buildAttention({ viewer, momentsOut, careDays, careAwaitingMe, kids, adults, now, tz, checkinDone: !!checkin, openInvite: !!invite, calendars, datesAhead, rituals: ritualsOut, planning });
+  const placesOut = await placesFor(db, household.id);
+  const hours = await forecastFor(db, household.id, now);
+  const weather: Record<string, DayWeather> = {};
+  const wetPlans: WetPlan[] = [];
+  if (hours) {
+    for (const d of dayList) {
+      const w = dayWeather(hours, d, tz);
+      if (w) weather[d] = w;
+    }
+    const ideas = [...CATALOGUE, ...placeActivities(placesOut, "family"), ...placeActivities(placesOut, "me")];
+    for (const m of momentsOut) {
+      if (m.momentKind === "us" || m.detailsHidden || m.lifecycle !== "planned" || m.end <= now.getTime() || !m.participantIds.includes(viewer)) continue;
+      const activity = activityFor(m.activityKey, m.momentKind, placesOut);
+      if (!activity?.weatherSensitive) continue;
+      const r = rainDuring(hours, m.start, m.end);
+      if (!isWet(r)) continue;
+      const ages = m.childIds.map((id) => kids.find((k) => k.id === id)?.ageBand).filter((a) => !!a) as string[];
+      wetPlans.push({ momentId: m.id, chance: r!.chance, swaps: swapOptions({ activity: { ...activity, kind: m.momentKind }, ideas, childAges: ages }) });
+    }
+  }
+  const wishRows = kids.length
+    ? await db.select().from(childWishes).where(and(eq(childWishes.householdId, household.id), isNull(childWishes.handledAt))).orderBy(childWishes.createdAt)
+    : [];
+  const turnToChoose = await whoseTurn(db, household.id, kids.map((k) => k.id));
+
+  const attention = buildAttention({ viewer, momentsOut, careDays, careAwaitingMe, kids, adults, now, tz, checkinDone: !!checkin, openInvite: !!invite, calendars, datesAhead, rituals: ritualsOut, planning, wetPlans, wishes: wishRows });
 
   return {
     me: { id: viewer, displayName: adults.find((a) => a.id === viewer)?.displayName ?? actor.displayName },
@@ -678,8 +725,13 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     rituals: ritualsOut,
     helpers: helperRows.map((h) => ({ id: h.id, name: h.name, relation: h.relation, phone: h.phone, version: h.version })),
     planning,
-    places: await placesFor(db, household.id),
+    places: placesOut,
     trips: tripsOut,
+    place: household.placeName ? { name: household.placeName } : null,
+    weather,
+    wetPlans,
+    wishes: wishRows.filter((w) => kids.some((k) => k.id === w.childId)).map((w) => ({ id: w.id, childId: w.childId, title: w.title, activityKey: w.activityKey, createdAt: w.createdAt.toISOString() })),
+    turnToChoose,
     nextFamilyTrip: await nextFamilyTrip(db, household.id, now),
     markers: Object.fromEntries(dayList.flatMap((d) => {
       const name = bankHoliday(d, tz);
@@ -735,6 +787,8 @@ function buildAttention(input: {
   datesAhead: { id: string; title: string; date: string; days: number }[];
   rituals: RitualView[];
   planning: { weekKey: string; planned: boolean };
+  wetPlans?: WetPlan[];
+  wishes?: { id: string; childId: string; title: string }[];
 }): AttentionItem[] {
   const { viewer, now } = input;
   const out: AttentionItem[] = [];
@@ -760,6 +814,25 @@ function buildAttention(input: {
     if (m.lifecycle === "completed" && m.participantIds.includes(viewer) && !m.myFeedbackSaved) {
       out.push({ key: `reflect:${m.id}`, priority: 4, text: `How was “${m.title}”? (only you see this)`, action: "reflect", targetId: m.id });
     }
+  }
+  // Your own time, defended: a clash or lost cover is shown to its owner first (blueprint, Me).
+  for (const m of input.momentsOut) {
+    if (m.momentKind !== "me" || m.organiserId !== viewer || m.lifecycle !== "planned" || m.end <= nowMs || !m.agreed) continue;
+    const when = whenPhrase(m.start, nowMs, input.tz);
+    if (m.conflicts.length) {
+      out.push({ key: `me-clash:${m.id}:${m.conflicts.map((c) => c.start).join(",")}`, priority: 1, text: `Something now overlaps your time ${when}. Move it or keep it?`, action: "me-clash", targetId: m.id });
+    } else if (m.needsCare && m.careState !== "covered") {
+      out.push({ key: `me-cover:${m.id}`, priority: 1, text: `Your time ${when} needs cover for the children again`, action: "me-clash", targetId: m.id });
+    }
+  }
+  for (const w of input.wetPlans ?? []) {
+    const m = input.momentsOut.find((x) => x.id === w.momentId);
+    if (!m) continue;
+    const what = m.momentKind === "me" ? "your time" : m.title;
+    out.push({ key: `wet:${m.id}:${w.chance}`, priority: 2, text: `Rain is likely for ${what} ${whenPhrase(m.start, nowMs, input.tz)} (${w.chance}%). There's an indoor swap.`, action: "weather", targetId: m.id });
+  }
+  for (const w of input.wishes ?? []) {
+    out.push({ key: `wish:${w.id}`, priority: 2, text: `${names([w.childId])} picked “${w.title}” for the family`, action: "wish", targetId: w.id });
   }
   for (const r of input.rituals.filter((r) => r.awaitingMe)) {
     const who = input.adults.find((a) => a.id === r.organiserId)?.displayName ?? "Your partner";
@@ -803,6 +876,22 @@ function buildAttention(input: {
 }
 
 export type { Busy };
+
+/**
+ * Whose turn it is to choose: the child whose last chosen family plan is
+ * oldest, or who hasn't chosen yet (oldest child first, as a tie-break is
+ * needed and they asked first).
+ */
+export async function whoseTurn(db: DbOrTx, householdId: string, childIds: readonly string[]): Promise<string | null> {
+  if (childIds.length < 2) return childIds[0] ?? null;
+  const rows = await db
+    .select({ childId: moments.chosenByChildId, last: sql<Date>`max(${moments.startAt})` })
+    .from(moments)
+    .where(and(eq(moments.householdId, householdId), eq(moments.kind, "family"), inArray(moments.chosenByChildId, [...childIds]), ne(moments.lifecycle, "cancelled")))
+    .groupBy(moments.chosenByChildId);
+  const last = new Map(rows.map((r) => [r.childId!, new Date(r.last).getTime()]));
+  return [...childIds].sort((a, b) => (last.get(a) ?? -Infinity) - (last.get(b) ?? -Infinity))[0];
+}
 
 /** The next whole-family trip in the coming 90 days, for a countdown. */
 async function nextFamilyTrip(db: Db, householdId: string, now: Date): Promise<TripView | null> {

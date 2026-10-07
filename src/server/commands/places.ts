@@ -2,6 +2,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { places } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
+import { safeBookingUrl } from "@/domain/booking";
 import { CATEGORIES } from "@/lib/catalogue";
 import { defineCommand, assertVersion } from "../pipeline";
 import { minor, requiredText, shortText } from "./helpers";
@@ -22,6 +23,16 @@ const placeFields = z.object({
   durationMinutes: z.number().int().min(15).max(1440).default(120),
   stepFree: z.boolean().default(false),
   calm: z.boolean().default(false),
+  bookingUrl: z
+    .string()
+    .max(500)
+    .default("")
+    .transform((v, c) => {
+      if (!v.trim()) return "";
+      const safe = safeBookingUrl(v);
+      if (!safe) c.addIssue({ code: "custom", message: "Use the booking page's full https:// address." });
+      return safe ?? "";
+    }),
 });
 
 export const addPlace = defineCommand({

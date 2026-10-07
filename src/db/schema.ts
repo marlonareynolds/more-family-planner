@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   date,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -61,6 +62,10 @@ export const households = pgTable("households", {
   scheduleRevision: integer("schedule_revision").notNull().default(1),
   createdAt: created(),
   deletedAt: ts("deleted_at"),
+  /** The household's town, for the weather and "near you" links. Optional. */
+  placeName: text("place_name"),
+  latitude: doublePrecision("latitude"),
+  longitude: doublePrecision("longitude"),
   version: version(),
 });
 
@@ -819,6 +824,8 @@ export const places = pgTable(
     durationMinutes: integer("duration_minutes").notNull().default(120),
     stepFree: boolean("step_free").notNull().default(false),
     calm: boolean("calm").notNull().default(false),
+    /** Where to book it (a table, tickets), https only. */
+    bookingUrl: text("booking_url").notNull().default(""),
     addedBy: uuid("added_by").notNull().references(() => accounts.id),
     createdAt: created(),
     archivedAt: ts("archived_at"),
@@ -885,3 +892,54 @@ export const calendarPushes = pgTable(
   },
   (t) => [primaryKey({ columns: [t.feedId, t.sourceKey] })],
 );
+
+// ── Screens for the family ─────────────────────────────────────────────────
+
+/**
+ * A no-account link for a shared screen: the kitchen display, or one
+ * child's own view. It shows only family logistics (family plans, children's
+ * activities, who has the children, time away), never plans for the adults,
+ * notes or money. Only the hash is stored; a link can be switched off.
+ */
+export const displayLinks = pgTable(
+  "display_links",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    /** Set for a child's view; null for the kitchen display. */
+    childId: uuid("child_id").references(() => children.id),
+    tokenHash: text("token_hash").notNull().unique(),
+    createdBy: uuid("created_by").notNull().references(() => accounts.id),
+    createdAt: created(),
+    lastSeenAt: ts("last_seen_at"),
+    revokedAt: ts("revoked_at"),
+  },
+  (t) => [index("display_links_household").on(t.householdId)],
+);
+
+/**
+ * A child's pick from their own screen when it's their turn to choose. It is
+ * a wish for the adults to plan around, not a plan; one open wish per child.
+ */
+export const childWishes = pgTable(
+  "child_wishes",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    childId: uuid("child_id").notNull().references(() => children.id),
+    activityKey: text("activity_key").notNull(),
+    title: text("title").notNull(),
+    createdAt: created(),
+    /** Planned or put aside by an adult. */
+    handledAt: ts("handled_at"),
+  },
+  (t) => [uniqueIndex("child_wishes_open").on(t.childId).where(sql`${t.handledAt} is null`)],
+);
+
+/** The latest hourly forecast for a household's town, refreshed by the tick. */
+export const weatherForecasts = pgTable("weather_forecasts", {
+  householdId: uuid("household_id").primaryKey().references(() => households.id),
+  fetchedAt: ts("fetched_at").notNull(),
+  /** Hourly points: { t: epoch ms, rain: % chance, mm, code: WMO, temp: °C }. */
+  hours: jsonb("hours").notNull(),
+});

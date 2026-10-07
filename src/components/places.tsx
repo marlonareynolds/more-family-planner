@@ -43,6 +43,7 @@ export function PlacesBoard() {
                 </div>
                 {p.area && <p className="text-sm text-ink-3">{p.area}</p>}
                 {p.notes && <p className="text-sm text-ink-2">{p.notes}</p>}
+                {p.bookingUrl && <a href={p.bookingUrl} target="_blank" rel="noopener noreferrer" className="w-fit text-sm text-brand underline">Book</a>}
                 <p className="mt-auto flex flex-wrap gap-1 pt-2">
                   {p.kinds.map((k) => <Badge key={k} tone={k}>{KIND_LABEL[k]}</Badge>)}
                   <Badge>{CATEGORY_LABEL[p.category]}</Badge>
@@ -76,6 +77,7 @@ export function PlaceEditor({ place, initial, onClose }: { place: PlaceView | nu
   const [hours, setHours] = useState(String((seed.durationMinutes ?? 120) / 60));
   const [stepFree, setStepFree] = useState(seed.stepFree ?? false);
   const [calm, setCalm] = useState(seed.calm ?? false);
+  const [bookingUrl, setBookingUrl] = useState(seed.bookingUrl ?? "");
   const [localError, setLocalError] = useState<string | null>(null);
 
   const toggle = (k: PlaceView["kinds"][number]) => setKinds(kinds.includes(k) ? kinds.filter((x) => x !== k) : [...kinds, k]);
@@ -84,7 +86,7 @@ export function PlaceEditor({ place, initial, onClose }: { place: PlaceView | nu
     if (Number.isNaN(typicalCostMinor) || typicalCostMinor === null) return setLocalError("Enter the cost like 20 or 12.50.");
     const durationMinutes = Math.round(Math.min(24, Math.max(0.25, Number(hours) || 2)) * 60);
     setLocalError(null);
-    const fields = { name, area, kinds, category, setting, notes, typicalCostMinor, durationMinutes, stepFree, calm };
+    const fields = { name, area, kinds, category, setting, notes, typicalCostMinor, durationMinutes, stepFree, calm, bookingUrl };
     const ok = place ? await run("UpdatePlace", { placeId: place.id, version: place.version, ...fields }) : await run("AddPlace", fields);
     if (ok) onClose();
   }
@@ -123,6 +125,11 @@ export function PlaceEditor({ place, initial, onClose }: { place: PlaceView | nu
           <Field label="Usual length (hours)">{(id) => <input id={id} inputMode="decimal" className={inputClass} value={hours} onChange={(e) => setHours(e.target.value.replace(/[^\d.]/g, ""))} />}</Field>
         </div>
         <Field label="Why you like it (optional)">{(id) => <textarea id={id} rows={2} maxLength={300} className={`${inputClass} py-2`} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Quiet before 10, good for the little one" />}</Field>
+        {setting !== "home" && (
+          <Field label="Booking page (optional)" hint="Where you book a table or tickets. It shows as a Book button on plans here.">
+            {(id, d) => <input id={id} aria-describedby={d} type="url" inputMode="url" maxLength={500} className={inputClass} value={bookingUrl} onChange={(e) => setBookingUrl(e.target.value)} placeholder="https://…" spellCheck={false} />}
+          </Field>
+        )}
         <div className="flex flex-wrap gap-4">
           <Checkbox checked={stepFree} onChange={setStepFree} label="Step-free" />
           <Checkbox checked={calm} onChange={setCalm} label="Calm and quiet" />
