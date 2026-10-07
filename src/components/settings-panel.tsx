@@ -316,17 +316,52 @@ function YourData({ analyticsOptOut }: { analyticsOptOut: boolean }) {
   );
 }
 
+type LeaveHow = { command: "LeaveHousehold"; payload: { confirm: true } } | { command: "DeleteHousehold"; payload: { confirmName: string } };
+
 function Leaving({ household }: { household: WeekView["household"] }) {
   const app = useApp();
-  const { run, pending, error } = useCommand(household.id);
+  const { run, pending: running, error: commandError } = useCommand(household.id);
   const [mode, setMode] = useState<"leave" | "delete" | "close" | null>(null);
   const [confirmName, setConfirmName] = useState("");
   const [confirmClose, setConfirmClose] = useState("");
+  const [leaving, setLeaving] = useState(false);
+  const [leaveError, setLeaveError] = useState<string | null>(null);
+  // Calendar blocks More couldn't take out, shown before moving on.
+  const [leftover, setLeftover] = useState<{ text: string; then: () => void } | null>(null);
+  const pending = running || leaving;
+  const error = commandError ?? (leaveError ? { message: leaveError } : null);
+
+  /** Leave or delete, taking More's Busy blocks out of connected calendars first. */
+  async function leave(how: LeaveHow): Promise<string | false> {
+    setLeaving(true);
+    setLeaveError(null);
+    try {
+      const res = await fetch("/api/v1/household/leave", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ householdId: household.id, how }) });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setLeaveError(data?.error?.message ?? "Something went wrong.");
+        return false;
+      }
+      const left: { start: number; end: number }[] = data?.cleanup?.left ?? [];
+      if (!left.length) return "";
+      const when = left.slice(0, 6).map((b) => fmtDateTime(b.start, household.timeZone)).join("; ");
+      return `${left.length} “Busy” ${left.length === 1 ? "block" : "blocks"} More added to your Google or Outlook calendar couldn't be removed: ${when}${left.length > 6 ? " and more" : ""}. You can delete them in that calendar.`;
+    } catch {
+      setLeaveError("You seem to be offline. Try again.");
+      return false;
+    } finally {
+      setLeaving(false);
+    }
+  }
+  const after = (note: string, then: () => void) => (note ? setLeftover({ text: note, then }) : then());
   async function closeAccount() {
-    if (!(await run("LeaveHousehold", { confirm: true }, { refresh: false }))) return;
+    const note = await leave({ command: "LeaveHousehold", payload: { confirm: true } });
+    if (note === false) return;
     if (!(await run("CloseAccount", { confirm: "close" }, { refresh: false }))) return;
-    await fetch("/api/auth/sign-out", { method: "POST" }).catch(() => {});
-    window.location.replace("/");
+    after(note, async () => {
+      await fetch("/api/auth/sign-out", { method: "POST" }).catch(() => {});
+      window.location.replace("/");
+    });
   }
   const done = () => {
     window.location.href = "/setup";
@@ -367,7 +402,7 @@ function Leaving({ household }: { household: WeekView["household"] }) {
           footer={
             <>
               <Button onClick={() => setMode(null)}>Stay</Button>
-              <Button variant="danger" disabled={pending} onClick={async () => { if (await run("LeaveHousehold", { confirm: true }, { refresh: false })) done(); }}>Leave</Button>
+              <Button variant="danger" disabled={pending} onClick={async () => { const note = await leave({ command: "LeaveHousehold", payload: { confirm: true } }); if (note !== false) after(note, done); }}>Leave</Button>
             </>
           }
         >
@@ -390,7 +425,7 @@ function Leaving({ household }: { household: WeekView["household"] }) {
           footer={
             <>
               <Button onClick={() => setMode(null)}>Cancel</Button>
-              <Button variant="danger" disabled={pending || confirmName.trim() !== household.name} onClick={async () => { if (await run("DeleteHousehold", { confirmName }, { refresh: false })) done(); }}>
+              <Button variant="danger" disabled={pending || confirmName.trim() !== household.name} onClick={async () => { const note = await leave({ command: "DeleteHousehold", payload: { confirmName } }); if (note !== false) after(note, done); }}>
                 Delete for everyone
               </Button>
             </>
@@ -401,6 +436,11 @@ function Leaving({ household }: { household: WeekView["household"] }) {
             <p>This removes the shared diary, plans, care and costs for both adults. Each adult keeps their own private journal and check-ins.</p>
             <Field label={`Type "${household.name}" to confirm`}>{(id) => <input id={id} className={inputClass} value={confirmName} onChange={(e) => setConfirmName(e.target.value)} autoComplete="off" />}</Field>
           </div>
+        </Dialog>
+      )}
+      {leftover && (
+        <Dialog open onClose={leftover.then} title="Calendar blocks to remove" footer={<Button variant="primary" onClick={leftover.then}>OK</Button>}>
+          <p className="text-[15px]">{leftover.text}</p>
         </Dialog>
       )}
     </section>

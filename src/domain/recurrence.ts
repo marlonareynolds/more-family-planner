@@ -135,6 +135,10 @@ export function expand(
     .sort()
     .at(-1);
   const endsBefore = def.rule.endsBefore ? Temporal.PlainDateTime.from(def.rule.endsBefore) : null;
+  // Candidates this far before the horizon can't reach it (events last at
+  // most 14 days), so skip the time-zone work for them unless they were moved.
+  // This keeps a long-running series cheap to read (BR-18).
+  const tooEarly = Temporal.Instant.fromEpochMilliseconds(horizon.start - 16 * 86_400_000).toZonedDateTimeISO(def.timeZone).toPlainDateTime();
 
   const out: Occurrence[] = [];
   let produced = 0;
@@ -147,6 +151,7 @@ export function expand(
     produced++;
 
     const id = recurrenceIdOf(local);
+    if (Temporal.PlainDateTime.compare(local, tooEarly) < 0 && byId.get(id)?.kind !== "moved") continue;
     const natural = occurrenceInterval(def, local);
     const beyondHorizon = natural.start >= horizon.end;
     if (beyondHorizon && (!latestMovedOriginal || id > latestMovedOriginal)) break;

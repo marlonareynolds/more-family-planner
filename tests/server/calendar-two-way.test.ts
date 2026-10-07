@@ -1,10 +1,12 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-import { calendarFeeds, calendarPushes, events } from "@/db/schema";
+import { calendarFeeds, calendarPushes, events, memberships } from "@/db/schema";
 import { clearPushedBusy, syncFeed } from "@/server/calendar-sync";
 import type { HttpFetch } from "@/server/calendar-providers";
 import { seal, signValue, unseal, verifySigned } from "@/server/secret-box";
-import { newWorld } from "./harness";
+import { accountFor } from "@/server/auth";
+import { leaveHousehold } from "@/server/leaving";
+import { expectCode, newWorld } from "./harness";
 
 const NOW = new Date("2030-10-01T09:00:00Z");
 const WEEK = "2030-10-07";
@@ -230,6 +232,66 @@ describe("R09 disconnect reports cleanup honestly (BR-13, BR-14)", () => {
       return res;
     };
     await w.db.delete(events).where(eq(events.feedId, feedId));
+    await syncFeed(w.db, feedId, undefined, NOW, racing).catch(() => null);
+    expect(g.written.size).toBe(0);
+  });
+});
+
+describe("Leaving a household takes More's Busy blocks out (R09, BR-14)", () => {
+  async function withBlocks() {
+    const { w, feedId } = await googleFeed();
+    const g = fakeGoogle([]);
+    await w.run(w.alex, "AddTrip", { ...trip, travellerIds: [w.alex.accountId] });
+    await w.run(w.alex, "AddTrip", { ...trip, title: "Second", startDate: "2030-10-20", endDate: "2030-10-20", travellerIds: [w.alex.accountId] });
+    await syncFeed(w.db, feedId, undefined, NOW, g.http);
+    expect(g.written.size).toBe(2);
+    return { w, feedId, g };
+  }
+  const isMember = async (w: Awaited<ReturnType<typeof newWorld>>, accountId: string) =>
+    (await w.db.select().from(memberships).where(and(eq(memberships.accountId, accountId), isNull(memberships.endsAt)))).length > 0;
+
+  it("leaving removes the leaver's blocks from their calendar", async () => {
+    const { w, g } = await withBlocks();
+    const { cleanup } = await leaveHousehold(w.db, w.alex, w.householdId, { command: "LeaveHousehold", payload: { confirm: true } }, g.http, NOW);
+    expect(cleanup).toEqual({ removed: 2, left: [], reason: null });
+    expect(g.written.size).toBe(0);
+    expect(await isMember(w, w.alex.accountId)).toBe(false);
+  });
+
+  it("a provider that can't be reached doesn't trap anyone: they leave, and are told which blocks to delete", async () => {
+    const { w, g } = await withBlocks();
+    const down: HttpFetch = async (url, init) => ((init?.method ?? "GET") === "DELETE" ? new Response(null, { status: 503 }) : g.http(url, init));
+    const { cleanup } = await leaveHousehold(w.db, w.alex, w.householdId, { command: "LeaveHousehold", payload: { confirm: true } }, down, NOW);
+    expect(cleanup.reason).toBe("provider");
+    expect(cleanup.left.map((b) => b.start)).toEqual([Date.parse("2030-10-08T07:00:00Z"), Date.parse("2030-10-20T07:00:00Z")]);
+    expect(await isMember(w, w.alex.accountId)).toBe(false);
+  });
+
+  it("a refused request touches nobody's calendar", async () => {
+    const { w, g } = await withBlocks();
+    await expectCode(leaveHousehold(w.db, w.alex, w.householdId, { command: "DeleteHousehold", payload: { confirmName: "Wrong name" } }, g.http, NOW), "VALIDATION");
+    const outsider = await accountFor(w.db, { subject: "test:outsider", displayName: "Outsider" });
+    await expectCode(leaveHousehold(w.db, outsider, w.householdId, { command: "DeleteHousehold", payload: { confirmName: "The Reynolds" } }, g.http, NOW), "NOT_FOUND");
+    expect(g.written.size).toBe(2);
+  });
+
+  it("deleting the household removes every adult's blocks", async () => {
+    const { w, g } = await withBlocks();
+    const { cleanup } = await leaveHousehold(w.db, w.sam, w.householdId, { command: "DeleteHousehold", payload: { confirmName: "The Reynolds" } }, g.http, NOW);
+    expect(cleanup.removed).toBe(2);
+    expect(g.written.size).toBe(0);
+  });
+
+  it("BR-14: a sync that writes a block while the adult is leaving takes it back out", async () => {
+    const { w, feedId } = await googleFeed();
+    const g = fakeGoogle([]);
+    await w.run(w.alex, "AddTrip", { ...trip, travellerIds: [w.alex.accountId] });
+    // Alex leaves between the provider accepting the block and More recording it.
+    const racing: HttpFetch = async (url, init) => {
+      const res = await g.http(url, init);
+      if (init?.method === "POST") await leaveHousehold(w.db, w.alex, w.householdId, { command: "LeaveHousehold", payload: { confirm: true } }, g.http, NOW);
+      return res;
+    };
     await syncFeed(w.db, feedId, undefined, NOW, racing).catch(() => null);
     expect(g.written.size).toBe(0);
   });
