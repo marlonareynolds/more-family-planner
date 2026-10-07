@@ -228,7 +228,7 @@ function titleFrom(line: string, cut: { start: number; end: number }[], fallback
   return `${cut80.slice(0, cut80.lastIndexOf(" ") > 40 ? cut80.lastIndexOf(" ") : 79)}…`;
 }
 
-function childrenIn(text: string, children: ReadContext["children"]): string[] {
+export function childrenIn(text: string, children: ReadContext["children"]): string[] {
   return children
     .filter((c) => c.preferredName.trim().length >= 2 && new RegExp(`\\b${c.preferredName.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text))
     .map((c) => c.id);

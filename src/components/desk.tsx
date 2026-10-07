@@ -1,9 +1,9 @@
 "use client";
 
-import { Check, Inbox, Lock } from "lucide-react";
+import { Check, FileText, Inbox, Lock, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { readLetter, type Proposal, type ProposalKind, type ProposalRole } from "@/lib/desk-read";
+import { childrenIn, readLetter, type Proposal, type ProposalKind, type ProposalRole } from "@/lib/desk-read";
 import { useApp } from "./app-context";
 import { fmtDate, todayIn } from "./format";
 import { PeoplePicker } from "./people-picker";
@@ -62,14 +62,53 @@ function draftOf(p: Proposal, meId: string): Draft {
  * never sent or stored. Each item goes in through the same commands as the
  * hand-made version, with the same sharing and Me-time rules.
  */
-export function DeskBoard() {
+export function DeskBoard({ ai = false }: { ai?: boolean }) {
   const app = useApp();
   const router = useRouter();
   const { run, pending, error } = useCommand(app.householdId);
   const [text, setText] = useState("");
+  const [file, setFile] = useState<{ name: string; mediaType: string; data: string } | null>(null);
+  const [fileNote, setFileNote] = useState<string | null>(null);
+  const [reading, setReading] = useState(false);
+  const [readNote, setReadNote] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Draft[] | null>(null);
 
-  const read = () => setDrafts(readLetter(text, { today: todayIn(app.timeZone), children: app.children }).map((p) => draftOf(p, app.me.id)));
+  async function read() {
+    const today = todayIn(app.timeZone);
+    const ctx = { today, children: app.children };
+    setReadNote(null);
+    if (!ai) {
+      setDrafts(readLetter(text, ctx).map((p) => draftOf(p, app.me.id)));
+      return;
+    }
+    setReading(true);
+    try {
+      const res = await fetch("/api/v1/desk/read", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ householdId: app.householdId, today, timeZone: app.timeZone, text, file: file ? { mediaType: file.mediaType, data: file.data } : null }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error?.message ?? "The AI reader couldn't be reached, so this letter was read the simpler way.");
+      setDrafts((body.items as AiItem[]).map((i, n) => draftOf(fromAi(i, n, ctx), app.me.id)));
+    } catch (err) {
+      setReadNote(file && !text.trim() ? `${(err as Error).message.replace(/, so this letter was read the simpler way\.$/, ".")} Try again, or paste the letter's text instead.` : (err as Error).message);
+      setDrafts(text.trim() ? readLetter(text, ctx).map((p) => draftOf(p, app.me.id)) : null);
+    } finally {
+      setReading(false);
+    }
+  }
+
+  async function pick(f: File | undefined) {
+    setFileNote(null);
+    if (!f) return setFile(null);
+    try {
+      setFile(await prepareFile(f));
+    } catch (err) {
+      setFile(null);
+      setFileNote((err as Error).message);
+    }
+  }
   const patch = (key: string, change: Partial<Draft>) => setDrafts((ds) => ds?.map((d) => (d.key === key ? { ...d, ...change } : d)) ?? null);
   const chosen = drafts?.filter((d) => d.on && d.state !== "added") ?? [];
   const main = drafts?.filter((d) => d.role !== "optional") ?? [];
@@ -91,6 +130,9 @@ export function DeskBoard() {
 
   function clear() {
     setText("");
+    setFile(null);
+    setFileNote(null);
+    setReadNote(null);
     setDrafts(null);
   }
 
@@ -98,11 +140,17 @@ export function DeskBoard() {
     <div>
       <h1 className="font-display text-3xl">Household desk</h1>
       <p className="mt-1 max-w-prose text-ink-2">
-        Paste a school letter, a booking confirmation or an invitation. More picks out the dates and suggests what to add. You check each one; nothing goes in the diary until you tap Add.
+        {ai ? "Paste a school letter, a booking or an invitation, or add a photo or PDF of one." : "Paste a school letter, a booking confirmation or an invitation."} More picks out the dates and suggests what to add. You check each one; nothing goes in the diary until you tap Add.
       </p>
       <p className="mt-2 flex max-w-prose items-start gap-2 text-sm text-ink-3">
         <Lock aria-hidden size={16} className="mt-0.5 shrink-0" />
-        <span>The letter is read here on your phone. It isn&apos;t sent anywhere or saved, and {app.partner ? `${app.partner.displayName} only sees` : "anyone you share with only sees"} what you add.</span>
+        {ai ? (
+          <span>
+            The letter is read by Claude, Anthropic&apos;s AI, and isn&apos;t used to train it. More doesn&apos;t keep the letter, and {app.partner ? `${app.partner.displayName} only sees` : "anyone you share with only sees"} what you add.
+          </span>
+        ) : (
+          <span>The letter is read here on your phone. It isn&apos;t sent anywhere or saved, and {app.partner ? `${app.partner.displayName} only sees` : "anyone you share with only sees"} what you add.</span>
+        )}
       </p>
 
       <SectionTitle>Paste it here</SectionTitle>
@@ -118,12 +166,35 @@ export function DeskBoard() {
           />
         )}
       </Field>
+      {ai && (
+        <div className="mt-3">
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink hover:bg-surface-2">
+            <FileText aria-hidden size={16} />
+            <span>{file ? `Change photo or PDF` : "Add a photo or PDF"}</span>
+            <input type="file" accept="image/*,application/pdf" className="sr-only" onChange={(e) => pick(e.target.files?.[0])} />
+          </label>
+          {file && (
+            <span className="ml-3 text-sm text-ink-2">
+              {file.name} <button type="button" className="underline" onClick={() => setFile(null)}>Remove</button>
+            </span>
+          )}
+          {fileNote && <p className="mt-1 text-sm text-warn">{fileNote}</p>}
+        </div>
+      )}
       <div className="mt-3 flex flex-wrap gap-2">
-        <Button variant="primary" disabled={!text.trim()} onClick={read}>Read it</Button>
+        <Button variant="primary" disabled={reading || (!text.trim() && !file)} onClick={read}>
+          {reading ? "Reading…" : "Read it"}
+        </Button>
         {drafts && <Button onClick={clear}>Start again</Button>}
       </div>
 
-      {drafts && (
+      {reading && (
+        <p className="mt-6 flex items-center gap-2 text-ink-2" aria-live="polite">
+          <Sparkles aria-hidden size={16} /> Reading the whole letter. This takes a few seconds.
+        </p>
+      )}
+      {readNote && <p className="mt-6 text-sm text-warn">{readNote}</p>}
+      {drafts && !reading && (
         <section aria-live="polite">
           <SectionTitle hint={drafts.length ? "Untick what you don't want, change anything that's not right, then add." : undefined}>
             {main.length ? `Found ${main.length === 1 ? "1 thing" : `${main.length} things`}` : drafts.length ? "Nothing for the diary" : "Nothing to add"}
@@ -167,6 +238,64 @@ export function DeskBoard() {
       )}
     </div>
   );
+}
+
+interface AiItem {
+  kind: ProposalKind;
+  role: ProposalRole;
+  title: string;
+  startDate: string;
+  endDate: string;
+  startTime: string | null;
+  endTime: string | null;
+  quote: string;
+}
+
+/** An item from the AI reader, shaped like one from the reader on the phone. */
+function fromAi(i: AiItem, n: number, ctx: { today: string; children: { id: string; preferredName: string }[] }): Proposal {
+  const named = childrenIn(`${i.title} ${i.quote}`, ctx.children);
+  return {
+    key: `a${n}`,
+    kind: i.kind,
+    role: i.role,
+    title: i.title,
+    startDate: i.startDate,
+    endDate: i.endDate,
+    startTime: i.startTime,
+    endTime: i.startTime ? (i.endTime ?? plusMinutes(i.startTime, i.role === "deadline" ? 15 : 60)) : null,
+    childIds: named.length || i.kind !== "holiday" ? named : ctx.children.map((c) => c.id),
+    source: i.quote,
+    past: i.endDate < ctx.today,
+  };
+}
+
+function plusMinutes(time: string, minutes: number): string {
+  const total = Math.min(+time.slice(0, 2) * 60 + +time.slice(3) + minutes, 23 * 60 + 59);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** Photos are shrunk to a sharp, readable size before sending; PDFs go as they are. */
+async function prepareFile(f: File): Promise<{ name: string; mediaType: string; data: string }> {
+  if (f.type === "application/pdf") {
+    if (f.size > 3_000_000) throw new Error("That PDF is over 3MB. Try a photo of the page instead.");
+    return { name: f.name, mediaType: f.type, data: await base64Of(f) };
+  }
+  if (!f.type.startsWith("image/")) throw new Error("Choose a photo or a PDF.");
+  const bitmap = await createImageBitmap(f);
+  const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("That photo couldn't be opened."))), "image/jpeg", 0.85));
+  return { name: f.name, mediaType: "image/jpeg", data: await base64Of(blob) };
+}
+
+async function base64Of(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
 }
 
 function valid(d: Draft): boolean {

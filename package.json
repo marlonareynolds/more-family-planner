@@ -19,6 +19,7 @@
     "vapid": "web-push generate-vapid-keys"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.132.0",
     "@electric-sql/pglite": "^0.5.8",
     "@js-temporal/polyfill": "^0.5.1",
     "@supabase/ssr": "^0.12.7",
