@@ -15,6 +15,7 @@ import "./places";
 import "./calendar-out";
 import "./trips";
 import "./display";
+import "./needs";
 import "./account";
 
 export { executeCommand, commandNames } from "../pipeline";

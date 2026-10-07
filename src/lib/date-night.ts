@@ -7,6 +7,7 @@
  * anywhere notes appear (the calendar feed, an export) and needs no schema.
  */
 
+import { weightedOrder, NEED_WEIGHT, type Need } from "./kindness";
 import { myShare, type Shelf } from "./private-split";
 
 export const DATE_NIGHT_KEY = "date-night-menu";
@@ -179,13 +180,87 @@ export function courseOptions(course: Course, mood: Mood, budget: Budget, places
 }
 
 /**
+ * Lines that suit what a partner said would help (kindness.ts). A need only
+ * tips which line the concierge offers first; the person composing never
+ * learns why, and can shuffle through every line on their shelf as before.
+ */
+export const LINE_NEEDS: Readonly<Record<string, readonly Need[]>> = {
+  "Phones in a drawer, and a toast to getting through the week": ["listened", "time"],
+  "Lay the table properly, cloth and all, as if you were out": ["noticed"],
+  "A bath run for two and a glass each, before anything else": ["close", "rest"],
+  "Your wedding playlist, or the songs from the year you met": ["close", "fun"],
+  "Meet in town straight from work, like you used to": ["time", "fun"],
+  "Take the long way round to dinner, arm in arm": ["close", "listened"],
+  "Get ready separately and meet there, like a first date": ["fun", "surprise"],
+  "A flask of something warm on your favourite bench": ["listened"],
+  "Bikes out for an hour, nowhere in particular": ["fun"],
+  "Each bring a question you've never asked the other": ["listened"],
+  "A short class together: pottery, salsa or a wine tasting": ["fun"],
+  "Each choose half of the evening and keep it secret": ["surprise", "fun"],
+  "Cook together with music on, one dish each": ["fun", "time"],
+  "Homemade pizza, toppings chosen in secret for each other": ["surprise", "fun"],
+  "A takeaway from the place you went to when you first met": ["close", "noticed"],
+  "A private chef for the evening, at your own table": ["rest", "noticed"],
+  "Oysters and champagne, for no reason at all": ["surprise"],
+  "A meal kit from a restaurant you love": ["rest"],
+  "Dinner somewhere local and walkable": ["listened", "time"],
+  "The restaurant you've been saving for an occasion": ["noticed", "surprise"],
+  "A tasting menu, with nowhere to rush to": ["time", "listened"],
+  "A picnic dinner as the sun goes down": ["time", "close"],
+  "Pub dinner at the end of a long walk": ["listened"],
+  "A country pub with rooms, dinner and the long way home": ["rest", "close"],
+  "An escape room, then dinner to argue about it": ["fun"],
+  "A comedy night, then a late bite": ["fun"],
+  "One episode, one blanket, no scrolling": ["close", "rest"],
+  "Dance in the kitchen to the first song you both loved": ["close", "fun"],
+  "Write each other one line about this year": ["noticed"],
+  "Old photos on the sofa, the ones from before the children": ["close", "listened"],
+  "An early night, and no alarm": ["close", "rest"],
+  "A taxi home the long way, past where you first lived": ["close"],
+  "Hot chocolate and the stars": ["close", "listened"],
+  "Walk back the way you came, slower": ["listened", "time"],
+  "Swap one thing you'd each love to try this year": ["listened", "fun"],
+  "Write down tonight's best moment and swap": ["noticed"],
+  "Tell each other one thing you didn't know until tonight": ["listened"],
+};
+
+/** Where each list starts for one person this week: `mood:course`, or `mood:budget:plat`. */
+export type MenuStarts = Record<string, number>;
+
+const startKey = (mood: Mood, budget: Budget, course: Course) => (course === "plat" ? `${mood}:${budget}:plat` : `${mood}:${course}`);
+
+/**
+ * The first line of every list, for one person this week. Computed on the
+ * server from a secret seed and the needs their partner shared, so the
+ * browser gets only positions: indistinguishable from a plain shuffle.
+ */
+export function menuStarts(input: { seed: string; needs: ReadonlySet<Need>; places?: PlaceOption[]; shelf?: Shelf }): MenuStarts {
+  const out: MenuStarts = {};
+  for (const mood of MOODS.map((m) => m.value)) {
+    for (const budget of BUDGETS.map((b) => b.value)) {
+      for (const course of ["entree", "plat", "dessert"] as Course[]) {
+        const key = startKey(mood, budget, course);
+        if (key in out) continue;
+        const list = courseOptions(course, mood, budget, input.places, input.shelf).map((o, i) => ({ ...o, i }));
+        if (!list.length) continue;
+        const weight = (o: { text: string }) => ((LINE_NEEDS[o.text] ?? []).some((n) => input.needs.has(n)) ? NEED_WEIGHT : 1);
+        out[key] = weightedOrder(list, (o) => o.text, weight, `${input.seed}:${key}`)[0].i;
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * One suggestion per course. `turns` counts how often each course was
  * shuffled; the seed keeps a person's first suggestion stable for a week.
+ * `starts`, from the server, replaces the seed for where each list begins.
  */
-export function composeMenu(input: { mood: Mood; budget: Budget; seed: string; turns?: Partial<Record<Course, number>>; places?: PlaceOption[]; shelf?: Shelf }): Menu {
+export function composeMenu(input: { mood: Mood; budget: Budget; seed: string; turns?: Partial<Record<Course, number>>; places?: PlaceOption[]; shelf?: Shelf; starts?: MenuStarts }): Menu {
   const pick = (course: Course) => {
     const list = courseOptions(course, input.mood, input.budget, input.places, input.shelf);
-    return list[(hash(`${input.seed}:${course}:${input.mood}`) + (input.turns?.[course] ?? 0)) % list.length];
+    const start = input.starts?.[startKey(input.mood, input.budget, course)] ?? hash(`${input.seed}:${course}:${input.mood}`);
+    return list[(start + (input.turns?.[course] ?? 0)) % list.length];
   };
   const plat = pick("plat");
   return { entree: pick("entree").text, plat: plat.text, dessert: pick("dessert").text, note: "", location: plat.location };

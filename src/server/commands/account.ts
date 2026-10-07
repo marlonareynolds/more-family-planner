@@ -7,6 +7,9 @@ import {
   emailSends,
   feedback,
   journalEntries,
+  kindnessMarks,
+  needNotes,
+  partnerNeeds,
   memberships,
   notifications,
   preferences,
@@ -22,7 +25,7 @@ import { defineCommand } from "../pipeline";
  * Close your own account. Leave the household first (that hands plans,
  * jobs and calendars back to whoever stays). Then everything that was only
  * yours is erased: journal, check-ins, feedback, what More learned about
- * you, trial answers, notifications and devices. Your name becomes "Former
+ * you, what would help you, trial answers, notifications and devices. Your name becomes "Former
  * member" on shared history. Signing in again with the same email starts a
  * fresh, empty account.
  */
@@ -35,7 +38,7 @@ export const closeAccount = defineCommand({
     const [member] = await ctx.tx.select({ id: memberships.id }).from(memberships).where(and(eq(memberships.accountId, me), isNull(memberships.endsAt)));
     if (member) throw new DomainError("CONFLICT", "Leave your household first, then close your account.");
 
-    for (const table of [journalEntries, checkins, feedback, preferences, suppressions, trialResponses, notifications, pushSubscriptions, emailSends, calendarExports]) {
+    for (const table of [journalEntries, checkins, feedback, preferences, suppressions, trialResponses, notifications, pushSubscriptions, emailSends, calendarExports, partnerNeeds, needNotes, kindnessMarks]) {
       await ctx.tx.delete(table).where(eq(table.accountId, me));
     }
     // Support messages stay for the operator to finish handling, no longer tied to you.

@@ -1002,3 +1002,50 @@ export const supportRequests = pgTable(
   },
   (t) => [index("support_requests_open").on(t.createdAt).where(sql`${t.handledAt} is null`)],
 );
+
+/**
+ * What would help (For Us): needs an adult shared privately, owned by that
+ * account like the journal, never by a household. `aboutId` is the partner
+ * it was about (null if they had no partner yet); it shapes only that
+ * partner's small kindnesses. A change counts from the following week:
+ * `since` and `until` bound when it applies, and ended rows are purged once
+ * they can no longer apply. Only the server reads these, and only to deal
+ * the other adult's card; nothing here is ever sent to another account.
+ */
+export const partnerNeeds = pgTable(
+  "partner_needs",
+  {
+    id: id(),
+    accountId: uuid("account_id").notNull().references(() => accounts.id),
+    aboutId: uuid("about_id").references(() => accounts.id),
+    need: text("need").notNull(),
+    /** False: "just for me", kept as a private note that shapes nothing. */
+    shapes: boolean("shapes").notNull().default(true),
+    since: ts("since").notNull().defaultNow(),
+    until: ts("until"),
+  },
+  (t) => [
+    uniqueIndex("partner_needs_open").on(t.accountId, t.need).where(sql`${t.until} is null`),
+    index("partner_needs_about").on(t.aboutId),
+  ],
+);
+
+/** The line in their own words that goes with their needs: sealed, only ever shown back to them. */
+export const needNotes = pgTable("need_notes", {
+  accountId: uuid("account_id").primaryKey().references(() => accounts.id),
+  sealed: text("sealed").notNull(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
+/** Small kindnesses an adult did or passed on, per week. Private to them. */
+export const kindnessMarks = pgTable(
+  "kindness_marks",
+  {
+    accountId: uuid("account_id").notNull().references(() => accounts.id),
+    weekKey: date("week_key").notNull(),
+    kindnessKey: text("kindness_key").notNull(),
+    mark: text("mark", { enum: ["done", "skip"] }).notNull(),
+    createdAt: created(),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.weekKey, t.kindnessKey] })],
+);

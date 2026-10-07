@@ -28,6 +28,7 @@ function confirmation(command: string, p: Payload): { text: string; celebrate?: 
     case "JoinRitual": return { text: "You're in. The dates are in the diary.", celebrate: true };
     case "AddHelper": return { text: "Helper saved." };
     case "SaveCheckin": return { text: "Check-in saved, just for you." };
+    case "SaveNeeds": return { text: "Saved, just for you." };
     case "CreateInvite": return null;
     default: return null;
   }

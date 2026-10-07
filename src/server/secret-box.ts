@@ -43,3 +43,11 @@ export function verifySigned(signed: string, purpose: string): string | null {
   const given = Buffer.from(signed.slice(i + 1));
   return expected.length === given.length && timingSafeEqual(expected, given) ? value : null;
 }
+
+/**
+ * A seed nobody can recompute from outside the server: used where an order
+ * must not reveal what shaped it (small kindnesses, the date night menu).
+ */
+export function privateSeed(value: string): string {
+  return createHmac("sha256", keyFor("private-seed")).update(value).digest("base64url");
+}
