@@ -17,6 +17,7 @@ export type ErrorCode =
   | "INVITE_INVALID"
   | "FEATURE_DISABLED"
   | "ALLOWANCE_EXHAUSTED"
+  | "RATE_LIMITED"
   | "INTERNAL";
 
 const STATUS: Record<ErrorCode, number> = {
@@ -34,6 +35,7 @@ const STATUS: Record<ErrorCode, number> = {
   INVITE_INVALID: 404,
   FEATURE_DISABLED: 503,
   ALLOWANCE_EXHAUSTED: 429,
+  RATE_LIMITED: 429,
   INTERNAL: 500,
 };
 
