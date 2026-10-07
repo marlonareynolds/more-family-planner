@@ -81,7 +81,7 @@ describe("dates, privacy and money", () => {
     const late = new Date(Date.UTC(2030, 9, 11, 0, 0));
     await processOutbox(w.db, late);
     const notes = (await w.week(w.sam, WEEK, late)).notifications.map((n) => n.text);
-    expect(notes).toContain("Alex invited you to a plan.");
+    expect(notes).toContain("Alex has planned something for 11 October.");
     expect(notes).toContain("A plan was cancelled.");
     expect(notes.some((t) => t.includes("tomorrow"))).toBe(false);
     // Running the worker again delivers nothing twice (INV-12).

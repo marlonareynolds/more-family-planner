@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { acceptances, expenses, feedback, highlights, moments, preparationTasks, weekPlans } from "@/db/schema";
 import { findConflicts } from "@/domain/availability";
+import { plansWith, whenPhrase } from "@/domain/discreet";
 import { DomainError } from "@/domain/errors";
 import { isAgreed, materialChanges, type AcceptanceRecord, type MomentFields } from "@/domain/moments";
 import { instantToLocalDate, isWeekKey } from "@/domain/time";
@@ -114,11 +115,14 @@ async function settleAgreement(ctx: CommandContext, m: MomentRow): Promise<boole
   // A reminder the day before; superseded automatically if anything changes.
   const remindAt = new Date(m.startAt.getTime() - 24 * 3_600_000);
   if (remindAt.getTime() > ctx.now.getTime()) {
+    const names = m.kind === "us" ? await currentAdults(ctx.tx, ctx.household.id) : [];
     for (const p of m.participantIds) {
+      // Discreet on a lock screen: who and when, never what.
+      const partner = names.find((a) => a.id !== p && m.participantIds.includes(a.id))?.displayName;
       await queueNotification(ctx, {
         recipientId: p,
         kind: "moment.reminder",
-        text: m.kind === "me" ? "Your protected time is tomorrow." : "You have a plan together tomorrow.",
+        text: m.kind === "me" ? "Your protected time is tomorrow." : m.kind === "us" ? `${plansWith(partner)} ${whenPhrase(m.startAt.getTime(), remindAt.getTime(), ctx.household.timeZone)}.` : "You have a family plan tomorrow.",
         sourceType: "moment",
         sourceId: m.id,
         sourceVersion: m.materialVersion,
@@ -290,8 +294,9 @@ export const shareMoment = defineCommand({
       await queueNotification(ctx, {
         recipientId: other,
         kind: "moment.invited",
-        // Surprises keep their details hidden; time and practicalities are shown in the app.
-        text: updated.surprise ? `${ctx.actor.displayName} has planned a surprise and needs your answer.` : `${ctx.actor.displayName} invited you to a plan.`,
+        // Time for the two of you never names the plan on a lock screen;
+        // surprises keep their details hidden in the app too.
+        text: updated.kind === "us" ? `${ctx.actor.displayName} has planned something for ${whenPhrase(updated.startAt.getTime(), ctx.now.getTime(), ctx.household.timeZone)}.` : `${ctx.actor.displayName} invited you to a plan.`,
         sourceType: "moment",
         sourceId: m.id,
         sourceVersion: updated.materialVersion,
