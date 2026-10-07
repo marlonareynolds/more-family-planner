@@ -3,7 +3,7 @@
 Feature: private needs on For Us that shape the partner's small kindnesses and date night menu.
 Design: /mnt/project-files/reports/private-wishes-design.md
 Branch: claude/project-thread-86bzlt, commit f91bb10, on top of main 51f25cf (after PR #8).
-Migration: 0012_private_needs (additive: three new account-owned tables, RLS on, API grants revoked). **Not yet applied to Supabase**; waits for Marlon's OK.
+Migration: 0012_private_needs (additive: three new account-owned tables, RLS on, API grants revoked). Applied to Supabase (London) 2026-10-07 ~16:20 UTC with Marlon's OK on the decision card: 13 journal rows; all three tables owned by postgres, RLS on, no anon or authenticated access (checked like journal_entries).
 
 Each item below is marked: fixed and demonstrated / implemented not exercised / deferred by decision.
 
