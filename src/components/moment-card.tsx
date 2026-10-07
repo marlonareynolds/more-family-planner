@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { ExpenseView, MomentView } from "@/server/queries/week";
 import { useApp, useNow } from "./app-context";
 import { fmtDateTime, fmtMoney, fmtRange, fmtTime, localParts, minorToInput, toMinor } from "./format";
+import { AskHelperDialog } from "./ask-helper";
 import { MomentEditor } from "./moment-editor";
 import { Badge, Button, Card, Checkbox, Dialog, ErrorNote, Field, inputClass } from "./ui";
 import { useCommand } from "./use-command";
@@ -26,6 +27,7 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
   const [taskTitle, setTaskTitle] = useState("");
   const [taskOwner, setTaskOwner] = useState(app.me.id);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [asking, setAsking] = useState(false);
 
   const now = useNow();
   const tone = m.momentKind;
@@ -44,6 +46,8 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
         </div>
         <div className="flex flex-wrap gap-1">
           <Badge tone={tone}>{m.momentKind === "me" ? "Me" : m.momentKind === "us" ? "Us" : "Family"}</Badge>
+          {m.ritualId && <Badge>Repeats</Badge>}
+          {m.chosenByChildId && <Badge tone="family">{app.childName(m.chosenByChildId)}&apos;s pick</Badge>}
           <Badge tone={stageTone}>{m.stage}</Badge>
         </div>
       </div>
@@ -75,7 +79,12 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
               <strong className={m.careState === "covered" ? "text-good" : "text-warn"}>
                 {m.careState === "covered" ? "covered" : m.careState === "partly_covered" ? "partly covered" : "not arranged yet"}
               </strong>
-              {m.careState !== "covered" && m.lifecycle !== "cancelled" && <a href={`/holidays?date=${date}`} className="ml-2 text-brand underline">Arrange</a>}
+              {m.careState !== "covered" && m.lifecycle !== "cancelled" && !past && (
+                <>
+                  {app.helpers.length > 0 && <button className="ml-2 text-brand underline" onClick={() => setAsking(true)}>Ask {app.helpers[0].name}{app.helpers.length > 1 ? " or others" : ""}</button>}
+                  <a href={`/holidays?date=${date}`} className="ml-2 text-brand underline">Arrange</a>
+                </>
+              )}
             </p>
           )}
           {m.budgetMinor !== null && <p>Spending limit {fmtMoney(m.budgetMinor)}{expense ? ` · paid ${fmtMoney(expense.netPaidMinor)}` : ""}</p>}
@@ -130,6 +139,10 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
         </div>
       )}
 
+      {!compact && m.lifecycle === "completed" && (m.participantIds.includes(app.me.id) || m.momentKind === "family") && !m.detailsHidden && (
+        <Highlights moment={m} />
+      )}
+
       <ErrorNote message={error?.message} />
 
       {!compact && iAmIn && (
@@ -156,12 +169,12 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
           {m.lifecycle === "planned" && !past && (
             confirmCancel ? (
               <span className="flex items-center gap-2 text-sm">
-                Cancel this plan? Payments are kept.
-                <Button size="sm" variant="danger" onClick={() => run("CancelMoment", { momentId: m.id, version: m.version })}>Cancel plan</Button>
+                {m.ritualId ? "Skip just this date? The rest stay." : "Cancel this plan? Payments are kept."}
+                <Button size="sm" variant="danger" onClick={() => run("CancelMoment", { momentId: m.id, version: m.version })}>{m.ritualId ? "Skip it" : "Cancel plan"}</Button>
                 <Button size="sm" variant="ghost" onClick={() => setConfirmCancel(false)}>Keep</Button>
               </span>
             ) : (
-              <Button size="sm" variant="ghost" onClick={() => setConfirmCancel(true)}>Cancel…</Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmCancel(true)}>{m.ritualId ? "Skip this date…" : "Cancel…"}</Button>
             )
           )}
         </div>
@@ -170,6 +183,14 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
       {editing && <MomentEditor open onClose={() => setEditing(false)} moment={m} defaultDate={date} />}
       {reflecting && <ReflectDialog moment={m} onClose={() => setReflecting(false)} />}
       {costOpen && <CostDialog moment={m} expense={expense ?? null} onClose={() => setCostOpen(false)} />}
+      {asking && (
+        <AskHelperDialog
+          childIds={app.children.filter((c) => !m.childIds.includes(c.id)).map((c) => c.id)}
+          start={m.start - m.travelBeforeMinutes * 60_000}
+          end={m.end + m.travelAfterMinutes * 60_000}
+          onClose={() => setAsking(false)}
+        />
+      )}
     </Card>
   );
 }
@@ -274,5 +295,44 @@ function CostDialog({ moment, expense, onClose }: { moment: MomentView; expense:
         <ErrorNote message={localError ?? error?.message} />
       </div>
     </Dialog>
+  );
+}
+
+/** Shared one-liners about a plan that happened: everyone in it sees them. */
+function Highlights({ moment: m }: { moment: MomentView }) {
+  const app = useApp();
+  const { run, pending, error } = useCommand(app.householdId);
+  const mine = m.highlights.find((h) => h.mine);
+  const [text, setText] = useState(mine?.text ?? "");
+  const [editing, setEditing] = useState(!mine);
+  return (
+    <div className="mt-3 border-t border-line pt-3">
+      <p className="mb-1 text-sm font-medium text-ink-2">Highlights</p>
+      {m.highlights.length > 0 && (
+        <ul className="mb-2 space-y-1">
+          {m.highlights.map((h) => (
+            <li key={h.authorId} className="text-[15px]">
+              “{h.text}” <span className="text-sm text-ink-3">{h.mine ? "you" : h.authorName}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {editing ? (
+        <form
+          className="flex flex-wrap gap-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (await run("SaveHighlight", { momentId: m.id, text })) setEditing(false);
+          }}
+        >
+          <label className="sr-only" htmlFor={`hl-${m.id}`}>Your highlight</label>
+          <input id={`hl-${m.id}`} className={`${inputClass} min-h-9 flex-1 text-sm`} maxLength={280} placeholder="The best bit, in a line. Everyone in the plan sees it." value={text} onChange={(e) => setText(e.target.value)} />
+          <Button size="sm" type="submit" disabled={pending || (!text.trim() && !mine)}>{mine ? "Save" : "Share"}</Button>
+        </form>
+      ) : (
+        <button className="text-sm text-brand underline" onClick={() => setEditing(true)}>Edit your highlight</button>
+      )}
+      <ErrorNote message={error?.message} />
+    </div>
   );
 }

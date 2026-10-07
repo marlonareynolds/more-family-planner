@@ -8,6 +8,7 @@ export interface AppInfo {
   me: { id: string; displayName: string };
   adults: { id: string; displayName: string }[];
   children: { id: string; preferredName: string; ageBand: string; needs: string; version: number }[];
+  helpers: { id: string; name: string; phone: string }[];
 }
 
 export function infoFrom(w: WeekView): AppInfo {
@@ -19,6 +20,7 @@ export function infoFrom(w: WeekView): AppInfo {
     me: w.me,
     adults: w.adults,
     children: w.children,
+    helpers: w.helpers.map((h) => ({ id: h.id, name: h.name, phone: h.phone })),
   };
 }
 

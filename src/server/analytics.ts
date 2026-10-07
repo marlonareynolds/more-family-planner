@@ -20,6 +20,12 @@ export const PRODUCT_EVENT_TYPES = [
   "trial_response_saved",
   "calendar_connected",
   "active_day",
+  "push_enabled",
+  "week_planned",
+  "ritual_started",
+  "highlight_shared",
+  "helper_asked",
+  "setup_step",
 ] as const;
 export type ProductEventType = (typeof PRODUCT_EVENT_TYPES)[number];
 

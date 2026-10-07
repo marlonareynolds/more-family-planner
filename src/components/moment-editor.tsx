@@ -21,6 +21,9 @@ export interface MomentTemplate {
   location?: string;
   /** A suggested free time to start from. */
   slot?: { date: string; startTime: string; endTime: string; endDate: string };
+  adultIds?: string[];
+  childIds?: string[];
+  chosenByChildId?: string | null;
 }
 
 const KIND_TITLE: Record<MomentKind, string> = { me: "Time for me", us: "Time for us", family: "Family time" };
@@ -58,9 +61,10 @@ export function MomentEditor({
   const [location, setLocation] = useState(moment?.location ?? template?.location ?? "");
   const [span, setSpan] = useState<SpanValue>(moment ? spanFrom(moment.start, moment.end, app.timeZone) : (template?.slot ? { ...defaultSpan(template.slot.date, template.slot.startTime, template.slot.endTime), endDate: template.slot.endDate } : defaultSpan(defaultDate, startTime, endFromTemplate())));
   const [people, setPeople] = useState({
-    adultIds: moment?.participantIds ?? (kind === "me" ? [app.me.id] : app.adults.map((a) => a.id)),
-    childIds: moment?.childIds ?? (kind === "family" ? app.children.map((c) => c.id) : []),
+    adultIds: moment?.participantIds ?? template?.adultIds ?? (kind === "me" ? [app.me.id] : app.adults.map((a) => a.id)),
+    childIds: moment?.childIds ?? template?.childIds ?? (kind === "family" ? app.children.map((c) => c.id) : []),
   });
+  const [chosenBy, setChosenBy] = useState<string>(moment?.chosenByChildId ?? template?.chosenByChildId ?? "");
   const [needsCare, setNeedsCare] = useState(moment?.needsCare ?? (kind !== "family" && app.children.length > 0));
   const [budget, setBudget] = useState(minorToInput(moment?.budgetMinor ?? template?.budgetMinor ?? null));
   const [travelBefore, setTravelBefore] = useState(String(moment?.travelBeforeMinutes ?? 0));
@@ -85,6 +89,7 @@ export function MomentEditor({
       travelBeforeMinutes: Number(travelBefore) || 0,
       travelAfterMinutes: Number(travelAfter) || 0,
       surprise: kind === "us" && surprise,
+      chosenByChildId: kind === "family" && chosenBy ? chosenBy : null,
     };
     const ok = moment
       ? await run("EditMoment", { momentId: moment.id, version: moment.version, fields }, { expected: { membershipRevision: app.membershipRevision } })
@@ -112,6 +117,16 @@ export function MomentEditor({
         <Field label="What">{(id) => <input id={id} required className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={kind === "me" ? "A swim, a long walk, an hour with a book" : kind === "us" ? "Dinner, a show, a walk and a pub lunch" : "Park, cinema, pancake morning"} />}</Field>
         <SpanFields value={span} onChange={setSpan} allowAllDay={false} error={error} />
         {kind === "family" && <PeoplePicker adultIds={people.adultIds} childIds={people.childIds} onChange={setPeople} label="Who is coming" />}
+        {kind === "family" && app.children.length > 0 && (
+          <Field label="Whose pick? (optional)" hint="Let a child choose this one. It shows as their pick.">
+            {(id, d) => (
+              <select id={id} aria-describedby={d} className={inputClass} value={chosenBy} onChange={(e) => setChosenBy(e.target.value)}>
+                <option value="">Nobody in particular</option>
+                {app.children.map((c) => <option key={c.id} value={c.id}>{c.preferredName}&apos;s pick</option>)}
+              </select>
+            )}
+          </Field>
+        )}
         {kind === "us" && app.adults.length < 2 && <p className="text-sm text-warn">Invite your partner in Settings before sharing this.</p>}
         {app.children.length > 0 && (
           <Checkbox

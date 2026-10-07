@@ -3,7 +3,7 @@ import { getDb } from "@/db/client";
 import { requireActor } from "@/server/auth";
 import { executeCommand } from "@/server/commands";
 import { assertSameOrigin, errorResponse, noStore } from "@/server/http";
-import { processOutbox } from "@/server/outbox";
+import { afterChange } from "@/server/tick";
 
 export async function POST(req: Request) {
   try {
@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     // only catches anything left behind (future reminders, failed runs).
     after(async () => {
       try {
-        await processOutbox(await getDb(), new Date(), 25);
+        await afterChange(await getDb());
       } catch (err) {
         console.error("outbox drain after command failed", err);
       }

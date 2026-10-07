@@ -10,6 +10,8 @@ import {
   children,
   expenses,
   feedback,
+  helpers,
+  highlights,
   households,
   invitations,
   memberships,
@@ -17,7 +19,11 @@ import {
   notifications,
   paymentTransactions,
   preparationTasks,
+  rituals,
+  weekPlans,
 } from "@/db/schema";
+import { cadenceLabel } from "@/domain/rituals";
+import { planningWeekKey } from "@/domain/reach";
 import { canSeeDetails, findConflicts, type Busy } from "@/domain/availability";
 import { coverageFor, groupCoverage, type CareArrangement, type CoverageState } from "@/domain/care";
 import { DomainError } from "@/domain/errors";
@@ -122,6 +128,29 @@ export interface MomentView {
   tasks: { id: string; title: string; ownerId: string; state: "open" | "done"; version: number }[];
   myFeedbackSaved: boolean;
   expenseId: string | null;
+  ritualId: string | null;
+  chosenByChildId: string | null;
+  /** One-line shared memories, visible to everyone in the plan. */
+  highlights: { authorId: string; authorName: string; text: string; mine: boolean }[];
+}
+
+export interface RitualView {
+  id: string;
+  kind: "me" | "us" | "family";
+  title: string;
+  label: string;
+  cadence: "weekly" | "fortnightly" | "monthly";
+  startsOn: string;
+  startTime: string;
+  durationMinutes: number;
+  organiserId: string;
+  participantIds: string[];
+  childIds: string[];
+  agreedBy: string[];
+  awaitingMe: boolean;
+  active: boolean;
+  detailsHidden: boolean;
+  version: number;
 }
 
 export interface CareDay {
@@ -162,7 +191,7 @@ export interface AttentionItem {
   key: string;
   priority: number;
   text: string;
-  action: "respond" | "review" | "task" | "care" | "care-gap" | "reflect" | "complete" | "checkin" | "invite" | "calendar" | "date-ahead";
+  action: "respond" | "review" | "task" | "care" | "care-gap" | "reflect" | "complete" | "checkin" | "invite" | "calendar" | "date-ahead" | "ritual" | "plan-week";
   targetId?: string;
   date?: string;
 }
@@ -194,6 +223,11 @@ export interface WeekView {
   calendars: CalendarView[];
   /** Public holiday names by date: markers only, not proof anyone is off. */
   markers: Record<string, string>;
+  rituals: RitualView[];
+  /** The household's village: people who help with the children. */
+  helpers: { id: string; name: string; relation: string; phone: string; version: number }[];
+  /** The week the household is planning now, and whether it has been planned. */
+  planning: { weekKey: string; planned: boolean };
 }
 
 function hiddenLabel(m: MomentView | undefined): string | null {
@@ -318,6 +352,7 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     ? await db.select({ momentId: feedback.momentId }).from(feedback).where(and(eq(feedback.accountId, viewer), inArray(feedback.momentId, momentIds)))
     : [];
   const feedbackSet = new Set(myFeedback.map((f) => f.momentId));
+  const highlightRows = momentIds.length ? await db.select().from(highlights).where(inArray(highlights.momentId, momentIds)).orderBy(highlights.createdAt) : [];
 
   // ── Care ──
   const reqRows = await db
@@ -443,6 +478,15 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
       tasks: hidden ? [] : tasks.map((t) => ({ id: t.id, title: t.title, ownerId: t.ownerId, state: t.state, version: t.version })),
       myFeedbackSaved: feedbackSet.has(m.id),
       expenseId: null,
+      ritualId: m.ritualId,
+      chosenByChildId: hidden ? null : m.chosenByChildId,
+      // Highlights belong to the people in the plan (and the whole family's plans to both adults).
+      highlights:
+        hidden || !(m.participantIds.includes(viewer) || m.kind === "family")
+          ? []
+          : highlightRows
+              .filter((h) => h.momentId === m.id)
+              .map((h) => ({ authorId: h.accountId, authorName: adults.find((a) => a.id === h.accountId)?.displayName ?? "Someone", text: h.text, mine: h.accountId === viewer })),
     });
   }
 
@@ -514,7 +558,39 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     .where(and(eq(checkins.accountId, viewer), eq(checkins.weekKey, weekKeyFor(fromDate))));
 
   const datesAhead = await importantDatesAhead(db, household.id, viewer, now, tz);
-  const attention = buildAttention({ viewer, momentsOut, careDays, careAwaitingMe, kids, adults, now, tz, checkinDone: !!checkin, openInvite: !!invite, calendars, datesAhead });
+
+  // ── Rituals and the weekly plan ──
+  const ritualRows = await db.select().from(rituals).where(and(eq(rituals.householdId, household.id), isNull(rituals.endedAt))).orderBy(rituals.createdAt);
+  const ritualsOut: RitualView[] = ritualRows
+    .filter((r) => r.kind !== "me" || r.organiserId === viewer || r.agreedBy.length === r.participantIds.length)
+    .map((r) => {
+      const hidden = r.kind === "me" && r.organiserId !== viewer;
+      const organiserName = adults.find((a) => a.id === r.organiserId)?.displayName ?? "Your partner";
+      return {
+        id: r.id,
+        kind: r.kind,
+        title: hidden ? `${organiserName}: time for themselves` : r.title,
+        label: cadenceLabel(r.cadence, r.startsOn),
+        cadence: r.cadence,
+        startsOn: r.startsOn,
+        startTime: r.startTime,
+        durationMinutes: r.durationMinutes,
+        organiserId: r.organiserId,
+        participantIds: r.participantIds,
+        childIds: r.childIds,
+        agreedBy: r.agreedBy,
+        awaitingMe: r.participantIds.includes(viewer) && !r.agreedBy.includes(viewer),
+        active: r.participantIds.every((p) => r.agreedBy.includes(p)),
+        detailsHidden: hidden,
+        version: r.version,
+      };
+    });
+  const helperRows = await db.select().from(helpers).where(and(eq(helpers.householdId, household.id), isNull(helpers.archivedAt))).orderBy(helpers.createdAt);
+  const planningKey = planningWeekKey(now.getTime(), tz);
+  const [plan] = await db.select({ k: weekPlans.weekKey }).from(weekPlans).where(and(eq(weekPlans.householdId, household.id), eq(weekPlans.weekKey, planningKey))).limit(1);
+  const planning = { weekKey: planningKey, planned: !!plan };
+
+  const attention = buildAttention({ viewer, momentsOut, careDays, careAwaitingMe, kids, adults, now, tz, checkinDone: !!checkin, openInvite: !!invite, calendars, datesAhead, rituals: ritualsOut, planning });
 
   return {
     me: { id: viewer, displayName: adults.find((a) => a.id === viewer)?.displayName ?? actor.displayName },
@@ -548,6 +624,9 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     })),
     checkinDone: !!checkin,
     calendars,
+    rituals: ritualsOut,
+    helpers: helperRows.map((h) => ({ id: h.id, name: h.name, relation: h.relation, phone: h.phone, version: h.version })),
+    planning,
     markers: Object.fromEntries(dayList.flatMap((d) => {
       const name = bankHoliday(d, tz);
       return name ? [[d, name]] : [];
@@ -596,6 +675,8 @@ function buildAttention(input: {
   openInvite: boolean;
   calendars: CalendarView[];
   datesAhead: { id: string; title: string; date: string; days: number }[];
+  rituals: RitualView[];
+  planning: { weekKey: string; planned: boolean };
 }): AttentionItem[] {
   const { viewer, now } = input;
   const out: AttentionItem[] = [];
@@ -620,6 +701,17 @@ function buildAttention(input: {
     }
     if (m.lifecycle === "completed" && m.participantIds.includes(viewer) && !m.myFeedbackSaved) {
       out.push({ key: `reflect:${m.id}`, priority: 4, text: `How was “${m.title}”? (only you see this)`, action: "reflect", targetId: m.id });
+    }
+  }
+  for (const r of input.rituals.filter((r) => r.awaitingMe)) {
+    const who = input.adults.find((a) => a.id === r.organiserId)?.displayName ?? "Your partner";
+    out.push({ key: `ritual:${r.id}:${r.version}`, priority: 1, text: `${who} suggested “${r.title}”, ${r.label.toLowerCase()}`, action: "ritual", targetId: r.id });
+  }
+  // Own the weekly planning moment (spec 3.3): from Friday, offer next week.
+  if (!input.planning.planned) {
+    const dow = new Date(`${instantToLocalDate(nowMs, input.tz)}T12:00:00Z`).getUTCDay();
+    if (dow === 0 || dow >= 5 || dow === 1) {
+      out.push({ key: `plan-week:${input.planning.weekKey}`, priority: 2, text: "Take ten minutes together to plan the week", action: "plan-week" });
     }
   }
   for (const a of input.careAwaitingMe) {

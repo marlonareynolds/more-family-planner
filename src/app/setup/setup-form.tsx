@@ -15,7 +15,7 @@ export function SetupForm() {
       onSubmit={async (e) => {
         e.preventDefault();
         const r = await run("CreateHousehold", { name, timeZone }, { refresh: false });
-        if (r) window.location.href = "/today";
+        if (r) window.location.href = "/welcome";
       }}
     >
       <Field label="Household name" hint="For example, The Reynolds. You can start on your own and invite your partner later.">

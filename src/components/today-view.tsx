@@ -7,6 +7,7 @@ import { useApp } from "./app-context";
 import { CheckinDialog } from "./checkin-dialog";
 import { mondayOf, todayIn } from "./format";
 import { MomentCard } from "./moment-card";
+import { RitualCard } from "./rituals";
 import { WeekBoard } from "./week-board";
 import { Button, Card, EmptyState, SectionTitle } from "./ui";
 import { useCommand } from "./use-command";
@@ -20,6 +21,14 @@ export function TodayView({ data }: { data: WeekView }) {
   const needsMe = data.attention.filter((a) => a.priority <= 4);
   const unread = data.notifications.filter((n) => !n.read);
   const momentFor = (id?: string) => data.moments.find((m) => m.id === id);
+  const toAnswer = needsMe.filter((a) => a.action === "respond").map((a) => momentFor(a.targetId)).filter((m) => !!m && m.review !== "needs_review" && m.conflicts.length === 0);
+  const [answering, setAnswering] = useState(false);
+  async function yesToAll() {
+    setAnswering(true);
+    for (const m of toAnswer) await run("RespondToMoment", { momentId: m!.id, materialVersion: m!.materialVersion, decision: "accepted" }, { refresh: false });
+    setAnswering(false);
+    window.location.reload();
+  }
 
   return (
     <div>
@@ -38,7 +47,7 @@ export function TodayView({ data }: { data: WeekView }) {
         </Card>
       )}
 
-      <SectionTitle>Needs you</SectionTitle>
+      <SectionTitle action={toAnswer.length > 1 ? <Button size="sm" variant="primary" disabled={answering} onClick={yesToAll}>Yes to all {toAnswer.length}</Button> : undefined}>Needs you</SectionTitle>
       {needsMe.length === 0 ? (
         <EmptyState title="Nothing needs you right now." />
       ) : (
@@ -47,6 +56,21 @@ export function TodayView({ data }: { data: WeekView }) {
             const m = momentFor(a.targetId);
             if (m && (a.action === "respond" || a.action === "review" || a.action === "complete" || a.action === "reflect")) {
               return <li key={a.key}><MomentCard moment={m} expense={data.expenses.find((x) => x.id === m.expenseId)} /></li>;
+            }
+            const ritual = a.action === "ritual" ? data.rituals.find((r) => r.id === a.targetId) : null;
+            if (ritual) return <li key={a.key}><p className="mb-1 text-sm text-ink-2">{a.text}</p><RitualCard ritual={ritual} /></li>;
+            if (a.action === "plan-week") {
+              return (
+                <li key={a.key}>
+                  <Card tone="us" className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{a.text}</p>
+                      <p className="text-sm text-ink-2">See what&apos;s on, pick one thing for each of you, and send it in one go.</p>
+                    </div>
+                    <Link href="/plan" className="inline-flex min-h-11 shrink-0 items-center rounded-full bg-brand px-5 text-white">Start</Link>
+                  </Card>
+                </li>
+              );
             }
             return (
               <li key={a.key}>

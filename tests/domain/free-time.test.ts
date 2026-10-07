@@ -18,8 +18,8 @@ describe("free time suggestions", () => {
       busy: [...work("a", ["2030-10-07", "2030-10-08", "2030-10-09"]), busy("s", "2030-10-08T18:00", "2030-10-08T23:00")],
     });
     const labels = slots.map((s) => `${s.date} ${s.startTime}`);
-    expect(labels).toContain("2030-10-07 18:30");
-    expect(labels).toContain("2030-10-09 18:30");
+    expect(labels).toContain("2030-10-07 19:00");
+    expect(labels).toContain("2030-10-09 19:00");
     expect(labels.some((l) => l.startsWith("2030-10-08") && l >= "2030-10-08 17:30")).toBe(false);
     expect(slots.every((s) => s.end - s.start === 120 * 60_000)).toBe(true);
   });
@@ -43,5 +43,13 @@ describe("free time suggestions", () => {
     expect(slots.length).toBeGreaterThan(0);
     expect(slots.every((s) => s.start >= at("2030-10-12T13:00") || s.end <= at("2030-10-12T09:00"))).toBe(true);
     expect(slots[0].care).toBe("with_family");
+  });
+
+  it("offers variety in an empty fortnight instead of six identical evenings", () => {
+    const slots = suggestTimes({ ...base, days: 14, kind: "us", durationMinutes: 120, participantIds: ["a", "s"], carerIds: [], hasChildren: true, busy: [] });
+    const starts = slots.map((s) => s.startTime);
+    expect(slots).toHaveLength(6);
+    for (const t of new Set(starts)) expect(starts.filter((x) => x === t).length).toBeLessThanOrEqual(4);
+    expect(new Set(starts).size).toBeGreaterThan(1);
   });
 });

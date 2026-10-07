@@ -1,5 +1,8 @@
 "use client";
 
+import type { ReachSettings } from "@/server/queries/reach";
+import { HelpersSettings } from "./helpers-settings";
+import { ReachSettingsPanel } from "./reach-settings";
 import { useState } from "react";
 import type { WeekView } from "@/server/queries/week";
 import { useApp } from "./app-context";
@@ -38,6 +41,8 @@ export function SettingsPanel({
   profile,
   analyticsOptOut,
   calendars,
+  reach,
+  helpers,
 }: {
   household: WeekView["household"];
   openInvite: WeekView["openInvite"];
@@ -45,14 +50,18 @@ export function SettingsPanel({
   profile: { displayName: string; timeZone: string };
   analyticsOptOut: boolean;
   calendars: WeekView["calendars"];
+  reach: ReachSettings;
+  helpers: WeekView["helpers"];
 }) {
   return (
     <div className="max-w-2xl">
       <h1 className="font-display text-3xl">Settings</h1>
       <Profile profile={profile} />
+      <ReachSettingsPanel settings={reach} />
       <HouseholdDetails household={household} />
       <Adults openInvite={openInvite} />
       <Children kids={kids} />
+      <HelpersSettings helpers={helpers} />
       <CalendarSettings calendars={calendars} />
       <YourData analyticsOptOut={analyticsOptOut} />
       <Leaving household={household} />

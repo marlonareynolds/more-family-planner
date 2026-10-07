@@ -12,7 +12,9 @@ const primary = [
   { href: "/me", label: "Me", icon: "◐" },
 ];
 const secondary = [
+  { href: "/plan", label: "Plan" },
   { href: "/holidays", label: "Holidays" },
+  { href: "/look-back", label: "Look back" },
   { href: "/trial", label: "Trial" },
   { href: "/settings", label: "Settings" },
 ];
@@ -30,9 +32,9 @@ export function NavBar({ householdName, myName }: { householdName: string; myNam
         <Link href="/today" className="font-display text-xl text-brand">
           More
         </Link>
-        <nav aria-label="More places" className="flex gap-1">
+        <nav aria-label="More places" className="-mr-2 flex gap-0.5 overflow-x-auto">
           {secondary.map((s) => (
-            <Link key={s.href} href={s.href} aria-current={active(s.href) ? "page" : undefined} className={cx("rounded-full px-3 py-1.5 text-sm", active(s.href) ? "bg-brand-soft text-brand" : "text-ink-2")}>
+            <Link key={s.href} href={s.href} aria-current={active(s.href) ? "page" : undefined} className={cx("shrink-0 rounded-full px-2.5 py-1.5 text-sm", active(s.href) ? "bg-brand-soft text-brand" : "text-ink-2")}>
               {s.label}
             </Link>
           ))}

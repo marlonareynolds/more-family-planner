@@ -48,7 +48,9 @@ const hours = (ms: number, tz: string) => {
 /** How well a start time suits this kind of time (higher is better). */
 export function suitability(kind: MomentKind, h: number, weekend: boolean): number {
   if (kind === "us") {
-    if (h >= 18.5 && h <= 20) return 10;
+    // After the children's bedtime, unless a sitter makes earlier work.
+    if (h >= 19 && h <= 20) return 10;
+    if (h >= 18 && h < 19) return 8;
     if (weekend && h >= 10 && h <= 15) return 8;
     if (!weekend && h >= 12 && h <= 13) return 5;
     return 2;
@@ -117,8 +119,16 @@ export function suggestTimes(input: FreeTimeInput): SuggestedTime[] {
   }
   // Easiest to make happen first: best fit, then no extra childcare, then soonest.
   const careRank = { no_children: 0, with_family: 0, partner_free: 0, needs_care: 1 };
-  return candidates
-    .sort((a, b) => b.score - a.score || careRank[a.care] - careRank[b.care] || a.start - b.start)
-    .slice(0, input.limit ?? 6)
-    .sort((a, b) => a.start - b.start);
+  // Variety: at most two options share a start time, so an empty fortnight
+  // offers a weekend daytime or a lunch, not six identical evenings.
+  const seen = new Map<string, number>();
+  const picked: SuggestedTime[] = [];
+  for (const c of candidates.sort((a, b) => b.score - a.score || careRank[a.care] - careRank[b.care] || a.start - b.start)) {
+    const key = `${c.startTime}|${hours(c.start, tz).weekend}`;
+    if ((seen.get(key) ?? 0) >= 2) continue;
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+    picked.push(c);
+    if (picked.length >= (input.limit ?? 6)) break;
+  }
+  return picked.sort((a, b) => a.start - b.start);
 }

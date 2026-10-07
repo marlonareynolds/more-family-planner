@@ -7,6 +7,8 @@ import { todayIn } from "./format";
 import { MomentCard } from "./moment-card";
 import { MomentEditor, type MomentKind } from "./moment-editor";
 import { FindATime } from "./find-a-time";
+import { RitualsSection } from "./rituals";
+import { WeekPicksSection } from "./week-picks";
 import { Button, EmptyState, SectionTitle } from "./ui";
 
 /** Moments of one kind, split by what each adult needs to do next. */
@@ -33,10 +35,12 @@ export function MomentList({ data, kind, title, intro }: { data: WeekView; kind:
         </div>
         <Button variant="primary" onClick={() => setCreating(true)}>+ Plan something</Button>
       </div>
-      <FindATime kind={kind} />
       {waiting.length > 0 && (<><SectionTitle>Waiting for your answer</SectionTitle><ul className="flex flex-col gap-3">{waiting.map(card)}</ul></>)}
+      <WeekPicksSection kind={kind} />
       <SectionTitle>Coming up</SectionTitle>
-      {upcoming.length ? <ul className="flex flex-col gap-3">{upcoming.map(card)}</ul> : <EmptyState title="Nothing planned yet.">Pick an idea below or plan your own.</EmptyState>}
+      {upcoming.length ? <ul className="flex flex-col gap-3">{upcoming.map(card)}</ul> : <EmptyState title="Nothing planned yet.">Plan one of the picks above, or your own.</EmptyState>}
+      <RitualsSection kind={kind} rituals={data.rituals} />
+      <FindATime kind={kind} />
       {drafts.length > 0 && (<><SectionTitle>Your drafts</SectionTitle><p className="-mt-2 mb-3 text-sm text-ink-3">Only you can see these until you share them.</p><ul className="flex flex-col gap-3">{drafts.map(card)}</ul></>)}
       {past.length > 0 && (<><SectionTitle>Recently</SectionTitle><ul className="flex flex-col gap-3">{past.map(card)}</ul></>)}
       {creating && <MomentEditor open onClose={() => setCreating(false)} template={{ kind, title: "" }} defaultDate={todayIn(app.timeZone)} />}

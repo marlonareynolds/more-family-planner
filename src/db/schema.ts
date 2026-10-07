@@ -40,6 +40,13 @@ export const accounts = pgTable("accounts", {
   closedAt: ts("closed_at"),
   /** Product analytics opt-out (spec 21.1). Operational audit is unaffected. */
   analyticsOptOut: boolean("analytics_opt_out").notNull().default(false),
+  /** From the identity provider; used only for the weekly email. */
+  email: text("email"),
+  pushEnabled: boolean("push_enabled").notNull().default(true),
+  weeklyEmail: boolean("weekly_email").notNull().default(true),
+  /** Local times between which nothing is pushed (spec 13.2). */
+  quietStart: text("quiet_start").notNull().default("21:00"),
+  quietEnd: text("quiet_end").notNull().default("07:00"),
   version: version(),
 });
 
@@ -228,6 +235,11 @@ export const moments = pgTable(
     notes: text("notes").notNull().default(""),
     location: text("location").notNull().default(""),
     activityKey: text("activity_key"),
+    /** Generated from a ritual: one moment per ritual date. */
+    ritualId: uuid("ritual_id").references((): AnyPgColumn => rituals.id),
+    ritualDate: date("ritual_date"),
+    /** A family plan one child chose. */
+    chosenByChildId: uuid("chosen_by_child_id").references(() => children.id),
     startAt: ts("start_at").notNull(),
     endAt: ts("end_at").notNull(),
     travelBeforeMinutes: smallint("travel_before_minutes").notNull().default(0),
@@ -245,7 +257,73 @@ export const moments = pgTable(
     createdAt: created(),
     version: version(),
   },
-  (t) => [index("moments_household_time").on(t.householdId, t.startAt)],
+  (t) => [
+    index("moments_household_time").on(t.householdId, t.startAt),
+    uniqueIndex("moments_ritual_date").on(t.ritualId, t.ritualDate).where(sql`${t.ritualId} is not null`),
+  ],
+);
+
+/**
+ * A plan that repeats (Friday pizza, a fortnightly date night). Once every
+ * participant has agreed, its next few dates are generated as ordinary
+ * moments, each with its own care check, and any one can be skipped.
+ */
+export const rituals = pgTable(
+  "rituals",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    kind: text("kind", { enum: ["me", "us", "family"] }).notNull(),
+    organiserId: uuid("organiser_id").notNull().references(() => accounts.id),
+    title: text("title").notNull(),
+    notes: text("notes").notNull().default(""),
+    activityKey: text("activity_key"),
+    participantIds: uuid("participant_ids").array().notNull(),
+    childIds: uuid("child_ids").array().notNull().default(sql`'{}'::uuid[]`),
+    needsCare: boolean("needs_care").notNull().default(false),
+    budgetMinor: money("budget_minor"),
+    cadence: text("cadence", { enum: ["weekly", "fortnightly", "monthly"] }).notNull(),
+    /** First date; later dates keep its weekday (monthly: the same nth weekday). */
+    startsOn: date("starts_on").notNull(),
+    startTime: text("start_time").notNull(),
+    durationMinutes: integer("duration_minutes").notNull(),
+    agreedBy: uuid("agreed_by").array().notNull().default(sql`'{}'::uuid[]`),
+    endedAt: ts("ended_at"),
+    createdAt: created(),
+    version: version(),
+  },
+  (t) => [index("rituals_household").on(t.householdId)],
+);
+
+/**
+ * One line about a plan that happened, shared with everyone in it. Separate
+ * from private reflection, which never leaves its author.
+ */
+export const highlights = pgTable(
+  "highlights",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    momentId: uuid("moment_id").notNull().references(() => moments.id),
+    accountId: uuid("account_id").notNull().references(() => accounts.id),
+    text: text("text").notNull(),
+    createdAt: created(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("highlights_moment_author").on(t.momentId, t.accountId), index("highlights_household_time").on(t.householdId, t.createdAt)],
+);
+
+/** That the household sent its week plan (the Sunday ten minutes) for a week. */
+export const weekPlans = pgTable(
+  "week_plans",
+  {
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    weekKey: date("week_key").notNull(),
+    accountId: uuid("account_id").notNull().references(() => accounts.id),
+    items: integer("items").notNull().default(0),
+    sentAt: created(),
+  },
+  (t) => [primaryKey({ columns: [t.householdId, t.weekKey, t.accountId] })],
 );
 
 /** Append-only decisions; the current one per actor and version wins. */
@@ -334,6 +412,8 @@ export const careArrangements = pgTable(
     endAt: ts("end_at").notNull(),
     state: text("state", { enum: ["proposed", "confirmed", "declined"] }).notNull().default("proposed"),
     confirmedBy: uuid("confirmed_by").references(() => accounts.id),
+    /** A saved helper from the village, for external care. */
+    helperId: uuid("helper_id").references((): AnyPgColumn => helpers.id),
     confirmedAt: ts("confirmed_at"),
     createdBy: uuid("created_by").notNull().references(() => accounts.id),
     note: text("note").notNull().default(""),
@@ -341,6 +421,48 @@ export const careArrangements = pgTable(
     version: version(),
   },
   (t) => [index("care_arr_household_time").on(t.householdId, t.startAt)],
+);
+
+/**
+ * The household's village: people outside it who look after the children.
+ * They have no account; a phone number is optional and only used to open a
+ * text message on an adult's own phone.
+ */
+export const helpers = pgTable(
+  "helpers",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    name: text("name").notNull(),
+    relation: text("relation").notNull().default(""),
+    phone: text("phone").notNull().default(""),
+    createdAt: created(),
+    archivedAt: ts("archived_at"),
+    version: version(),
+  },
+  (t) => [index("helpers_household").on(t.householdId)],
+);
+
+/**
+ * A one-off ask to a helper for one care arrangement. The link token is
+ * hashed; the page it opens shows only the time, the children's first names
+ * and a reply.
+ */
+export const careAsks = pgTable(
+  "care_asks",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    helperId: uuid("helper_id").notNull().references(() => helpers.id),
+    arrangementId: uuid("arrangement_id").notNull().references(() => careArrangements.id),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: ts("expires_at").notNull(),
+    response: text("response", { enum: ["yes", "no"] }),
+    respondedAt: ts("responded_at"),
+    createdBy: uuid("created_by").notNull().references(() => accounts.id),
+    createdAt: created(),
+  },
+  (t) => [index("care_asks_arrangement").on(t.arrangementId)],
 );
 
 // ── Money ──────────────────────────────────────────────────────────────────
@@ -492,8 +614,39 @@ export const notifications = pgTable(
     dedupeKey: text("dedupe_key").notNull().unique(),
     createdAt: created(),
     readAt: ts("read_at"),
+    /** Sent to the person's devices (or deliberately not, e.g. no device). */
+    pushedAt: ts("pushed_at"),
   },
-  (t) => [index("notifications_owner").on(t.accountId, t.createdAt)],
+  (t) => [index("notifications_owner").on(t.accountId, t.createdAt), index("notifications_unpushed").on(t.createdAt).where(sql`${t.pushedAt} is null`)],
+);
+
+/** A browser push subscription for one device (spec 13.2). */
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: id(),
+    accountId: uuid("account_id").notNull().references(() => accounts.id),
+    endpoint: text("endpoint").notNull().unique(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    label: text("label").notNull().default(""),
+    createdAt: created(),
+    lastSuccessAt: ts("last_success_at"),
+    failures: integer("failures").notNull().default(0),
+  },
+  (t) => [index("push_subscriptions_owner").on(t.accountId)],
+);
+
+/** Once-per-period emails already sent, so a retry never sends twice. */
+export const emailSends = pgTable(
+  "email_sends",
+  {
+    accountId: uuid("account_id").notNull().references(() => accounts.id),
+    kind: text("kind").notNull(),
+    periodKey: text("period_key").notNull(),
+    sentAt: created(),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.kind, t.periodKey] })],
 );
 
 export const idempotencyKeys = pgTable(

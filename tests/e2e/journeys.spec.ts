@@ -40,9 +40,22 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   await axe(alex);
   await alex.getByLabel("Household name").fill(`Household ${tag}`);
   await alex.getByRole("button", { name: "Start our household" }).click();
-  await alex.waitForURL(/\/today/);
+  await alex.waitForURL(/\/welcome/);
   await alex.waitForLoadState("networkidle");
   await axe(alex);
+
+  // Getting started: add a child, then skip the rest for now
+  await alex.getByLabel("Child 1 name").fill("Robin");
+  await alex.getByRole("button", { name: "Save and continue" }).click();
+  await expect(alex.getByRole("heading", { name: "School holidays" })).toBeVisible();
+  await axe(alex);
+  for (const next of ["Your usual week", "Connect a calendar", "Invite your partner"]) {
+    await alex.getByRole("button", { name: "Skip for now" }).click();
+    await expect(alex.getByRole("heading", { name: next })).toBeVisible();
+  }
+  await axe(alex);
+  await alex.getByRole("button", { name: "Skip for now" }).click();
+  await expect(alex.getByRole("link", { name: "Plan this week" })).toBeVisible();
 
   // Invite from Settings
   await go(alex, "/settings");
@@ -51,11 +64,6 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   const link = await alex.getByLabel("Invitation link").inputValue();
   expect(link).toMatch(/\/join\//);
 
-  // Add a child
-  await alex.getByRole("button", { name: "+ Add a child" }).click();
-  await alex.getByLabel("Name they go by").fill("Robin");
-  await alex.getByLabel("Age band").selectOption("5-7");
-  await alex.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
   await expect(alex.getByText("Robin")).toBeVisible();
 
   // Sam joins
@@ -63,7 +71,7 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   await go(sam, new URL(link).pathname);
   await axe(sam);
   await sam.getByRole("button", { name: /join/i }).click();
-  await sam.waitForURL(/\/today/);
+  await sam.waitForURL(/\/welcome/);
 
   // Alex plans an evening for the two of them and invites Sam
   await go(alex, "/us");
@@ -102,7 +110,7 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   await expect(sam.getByText(`Private thought ${tag}`)).toHaveCount(0);
 
   // Remaining screens render and pass axe
-  for (const path of ["/today", "/family", "/holidays"]) {
+  for (const path of ["/today", "/family", "/holidays", "/plan", "/look-back"]) {
     await go(sam, path);
     await expect(sam.locator("main")).toBeVisible();
     await axe(sam);
@@ -118,7 +126,7 @@ test("an adult answers the weekly trial questions", async ({ browser }, info) =>
   const alex = await adult(browser, `Alex ${tag}`, vp);
   await alex.getByLabel("Household name").fill(`Household ${tag}`);
   await alex.getByRole("button", { name: "Start our household" }).click();
-  await alex.waitForURL(/\/today/);
+  await alex.waitForURL(/\/welcome/);
 
   await go(alex, "/trial");
   await axe(alex);

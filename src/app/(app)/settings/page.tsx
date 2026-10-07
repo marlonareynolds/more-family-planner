@@ -4,6 +4,7 @@ import { infoFrom } from "@/components/app-info";
 import { SettingsPanel } from "@/components/settings-panel";
 import { accounts } from "@/db/schema";
 import { loadRange } from "@/server/page-data";
+import { reachFor } from "@/server/queries/reach";
 
 export const metadata = { title: "Settings" };
 
@@ -19,6 +20,8 @@ export default async function SettingsPage() {
         profile={{ displayName: actor.displayName, timeZone: account?.timeZone ?? view.household.timeZone }}
         analyticsOptOut={account?.analyticsOptOut ?? false}
         calendars={view.calendars}
+        reach={await reachFor(db, actor)}
+        helpers={view.helpers}
       />
     </AppProvider>
   );

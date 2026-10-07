@@ -7,5 +7,8 @@ import "./money";
 import "./private";
 import "./trial";
 import "./calendars";
+import "./reach";
+import "./rituals";
+import "./village";
 
 export { executeCommand, commandNames } from "../pipeline";

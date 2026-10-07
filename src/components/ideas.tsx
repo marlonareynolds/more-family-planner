@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { matchActivities, type Activity, type AgeBand, type Setting } from "@/lib/catalogue";
+import type { SuggestedTime } from "@/domain/free-time";
 import { useApp } from "./app-context";
-import { fmtMoney, todayIn } from "./format";
+import { endDateOf } from "./week-picks";
+import { todayIn } from "./format";
 import { MomentEditor } from "./moment-editor";
 import { Badge, Button, Card, Checkbox, EmptyState, Field, Segmented, inputClass } from "./ui";
 
@@ -25,6 +27,26 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
   const [stepFree, setStepFree] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const [planning, setPlanning] = useState<Activity | null>(null);
+  const [slot, setSlot] = useState<SuggestedTime | null>(null);
+  const [finding, setFinding] = useState<string | null>(null);
+
+  // "Plan this" starts from the best free time for this idea, not from today.
+  async function plan(a: Activity) {
+    setFinding(a.key);
+    setSlot(null);
+    const minutes = Math.min(720, Math.max(30, Math.ceil(a.durationMinutes / 30) * 30));
+    try {
+      if (a.durationMinutes <= 720) {
+        const r = await fetch(`/api/v1/free-times?kind=${kind}&minutes=${minutes}`);
+        if (r.ok) {
+          const data = (await r.json()) as { slots: SuggestedTime[] };
+          setSlot([...data.slots].sort((x, y) => y.score - x.score || x.start - y.start)[0] ?? null);
+        }
+      }
+    } catch {}
+    setFinding(null);
+    setPlanning(a);
+  }
   const bands = [...new Set(app.children.map((c) => c.ageBand as AgeBand))];
 
   const matches = matchActivities({
@@ -108,7 +130,7 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
                   {a.weatherSensitive && a.backup && <p className="text-xs text-ink-3">If it rains: {a.backup}</p>}
                   {a.accessNotes && <p className="text-xs text-ink-3">{a.accessNotes}</p>}
                   <div className="mt-auto pt-2">
-                    <Button size="sm" onClick={() => setPlanning(a)}>Plan this</Button>
+                    <Button size="sm" disabled={finding === a.key} onClick={() => plan(a)}>{finding === a.key ? "Finding a time…" : "Plan this"}</Button>
                   </div>
                 </Card>
               </li>
@@ -133,6 +155,7 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
             notes: lowEffort || guidance[planning.key]?.guidance === "simplify" ? (planning.simpler ?? planning.summary) : planning.summary,
             budgetMinor: planning.typicalCostMinor || null,
             durationMinutes: planning.durationMinutes,
+            slot: slot ? { date: slot.date, startTime: slot.startTime, endTime: slot.endTime, endDate: endDateOf(slot) } : undefined,
           }}
           defaultDate={todayIn(app.timeZone)}
         />

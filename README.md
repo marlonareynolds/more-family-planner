@@ -71,14 +71,23 @@ saying data can reset at any time. Never use this with real families.
 3. Backups: add `DATABASE_URL` and `BACKUP_PASSPHRASE` as GitHub Actions
    secrets; a nightly job backs up, restores into an isolated database and
    verifies. See [docs/restore.md](docs/restore.md).
-4. The outbox cron in `vercel.json` runs daily, the Hobby plan limit.
-   On Pro, change it to every five minutes for timely reminders.
+4. Reminders: the cron in `vercel.json` runs daily (the Hobby plan limit).
+   The "Reminders and messages" GitHub workflow calls the same endpoint every
+   15 minutes once `MORE_APP_URL` and `CRON_SECRET` are added as Actions secrets.
+5. Phone notifications: run `pnpm vapid` locally and set
+   `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and
+   `VAPID_SUBJECT` (`mailto:you@example.com`) in Vercel. Without them push is
+   switched off and Settings says so. Quiet hours default to 21:00 to 07:00,
+   and several updates are bundled into one message.
+6. Sunday "week ahead" email: set `RESEND_API_KEY` and `EMAIL_FROM` (an
+   address on a domain verified in Resend; the free tier covers a trial).
+   `MORE_APP_URL` sets the links in emails.
 
 ## Not switched on yet
 
 - The AI concierge is off: no paid API calls until the founder approves.
-- Email and push delivery: notifications are stored in-app only; no
-  message is sent to anyone.
+- Email and push delivery stay off until their keys are added (see Deploy).
+- Photos on shared memories: text only until a DPIA is done.
 - Row-level security policies: access is enforced in the server layer.
   RLS is switched on with no policies (migration 0002), so Supabase's
   public Data API can read nothing; per-household policies are a planned
