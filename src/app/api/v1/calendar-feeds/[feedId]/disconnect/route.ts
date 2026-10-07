@@ -25,10 +25,12 @@ export async function POST(req: Request, { params }: RouteContext<"/api/v1/calen
     const db = await getDb();
     const [feed] = await db.select().from(calendarFeeds).where(and(eq(calendarFeeds.id, feedId), eq(calendarFeeds.accountId, actor.accountId)));
     if (!feed) throw new DomainError("NOT_FOUND", "That calendar could not be found.");
-    // Best effort: an expired grant can't remove them, and that mustn't trap the adult.
-    const cleared = await clearPushedBusy(db, feed.id).then(() => true, () => false);
+    // An expired grant can't remove them, and that mustn't trap the adult:
+    // they disconnect anyway and are told exactly which blocks to delete.
+    const cleanup = await clearPushedBusy(db, feed.id).catch(() => null);
     await executeCommand(actor, { command: "RemoveCalendarFeed", householdId: feed.householdId, idempotencyKey: randomUUID(), payload: { feedId: feed.id, version: body.data.version } });
-    return Response.json({ removed: true, cleared }, { headers: noStore });
+    const cleared = !!cleanup && cleanup.left.length === 0;
+    return Response.json({ removed: true, cleared, cleanup }, { headers: noStore });
   } catch (err) {
     return errorResponse(err);
   }

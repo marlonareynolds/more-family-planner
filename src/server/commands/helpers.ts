@@ -120,6 +120,11 @@ export async function supersedeDeliveries(tx: Tx, sourceId: string, kind?: strin
         kind ? sql`${outbox.payload}->>'kind' = ${kind}` : undefined,
       ),
     );
+  // Already delivered in the app but not yet pushed: don't push it later (R03).
+  await tx
+    .update(notifications)
+    .set({ pushState: "superseded", pushLeaseUntil: null })
+    .where(and(eq(notifications.sourceId, sourceId), inArray(notifications.pushState, ["pending", "retry"]), kind ? eq(notifications.kind, kind) : undefined));
 }
 
 /**

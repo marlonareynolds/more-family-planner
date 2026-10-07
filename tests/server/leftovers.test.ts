@@ -4,6 +4,8 @@ import { notifications } from "@/db/schema";
 import { nextUp } from "@/domain/next-up";
 import { queueLeaveReminders } from "@/server/leave-by";
 import { processOutbox } from "@/server/outbox";
+import { deliverPushes, setPushSender } from "@/server/reach/push";
+import { accounts } from "@/db/schema";
 import { newWorld, timed } from "./harness";
 
 const WEEK = "2030-10-07"; // Monday; London is on BST (UTC+1)
@@ -42,6 +44,20 @@ describe("leave-by reminders", () => {
     expect(await queueLeaveReminders(w.db, new Date("2030-10-11T15:00:00Z"))).toEqual({ queued: 1 });
     await processOutbox(w.db, new Date("2030-10-11T15:31:00Z"));
     expect(await told(w, w.alex.accountId)).toEqual(["Leave by 16:50 for Mia's football."]);
+  });
+
+  it("BR-15: a late run never sends a leave-by notice after the time to leave", async () => {
+    const { w } = await withFootball();
+    const pushed: string[] = [];
+    setPushSender(async (_t, m) => (pushed.push(m.body), 201));
+    await w.run(w.alex, "SavePushSubscription", { endpoint: "https://push.example.com/a", p256dh: "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM", auth: "tBHItJI5svbpez7KI4CCXg" }, { householdId: undefined });
+    await w.db.update(accounts).set({ quietStart: "21:00", quietEnd: "21:00" });
+    await queueLeaveReminders(w.db, new Date("2030-10-11T14:00:00Z"));
+    await processOutbox(w.db, new Date("2030-10-11T15:51:00Z"));
+    // The scheduler stalls until after 17:10 local (16:10Z): the notice expires unsent.
+    expect((await deliverPushes(w.db, new Date("2030-10-11T16:11:00Z"))).expired).toBe(1);
+    expect(pushed).toEqual([]);
+    setPushSender(null);
   });
 
   it("stays quiet during quiet hours and for plans without travel time", async () => {

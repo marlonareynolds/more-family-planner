@@ -47,6 +47,8 @@ export interface PushMessage {
   body: string;
   url: string;
   tag: string;
+  /** Seconds the push service may hold it for an offline phone. */
+  ttl?: number;
 }
 
 /** One message for whatever is waiting: lock-screen-safe texts only. */
@@ -59,4 +61,36 @@ export function bundle(items: { text: string; url: string }[]): PushMessage | nu
     url: "/today",
     tag: "more-updates",
   };
+}
+
+/**
+ * Push frequency policy (R03). Things from a person (an invitation, an
+ * answer, a childcare ask, a child's pick) and leave-by notices go out on
+ * the next run. Everything the app generates for itself (job and plan
+ * reminders, weather swaps, clashes) waits for one of two daily bundles,
+ * 07:30 and 18:00 local, so it reaches a phone at most twice a day unless
+ * it can ride along with something a person sent. Quiet hours hold both.
+ */
+const TIMELY_PREFIXES = ["moment.invited", "moment.accepted", "moment.declined", "moment.changed", "moment.cancelled", "moment.swapped", "care.", "child.wish", "job.proposed", "job.answered", "job.covered", "job.taken", "task.assigned", "ritual.invited", "ritual.joined", "event.leave", "test"];
+
+export function isTimely(kind: string): boolean {
+  return TIMELY_PREFIXES.some((p) => kind === p || (p.endsWith(".") && kind.startsWith(p)));
+}
+
+export const BUNDLE_TIMES = ["07:30", "18:00"] as const;
+
+/** The start of the bundle slot `epochMs` falls in, as an instant. */
+export function bundleSlotStart(epochMs: number, timeZone: string, toInstant: (local: string) => number): number {
+  const today = instantToLocalDate(epochMs, timeZone);
+  const candidates = [addDays(today, -1), today].flatMap((d) => BUNDLE_TIMES.map((t) => toInstant(`${d}T${t}`)));
+  return Math.max(...candidates.filter((c) => c <= epochMs));
+}
+
+/** How long a notice stays worth pushing, unless its source says otherwise. */
+export const PUSH_TTL_MS = 16 * 3_600_000;
+export const MAX_PUSH_ATTEMPTS = 5;
+
+/** Minutes to wait before retry `attempt` (1-based): 1, 2, 4, 8… */
+export function retryDelayMs(attempt: number): number {
+  return Math.min(60, 2 ** (attempt - 1)) * 60_000;
 }

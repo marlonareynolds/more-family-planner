@@ -13,7 +13,7 @@ import { leaveStillRelevant } from "./leave-by";
  * or changed plan never produces a stale reminder (AT-21).
  */
 
-interface NotifyPayload {
+export interface NotifyPayload {
   recipientId: string;
   kind: string;
   text: string;
@@ -23,9 +23,11 @@ interface NotifyPayload {
   householdId: string;
   /** For a leave-by reminder: which occurrence of a repeating event. */
   occurrenceStart?: number;
+  /** When this stops being worth pushing (epoch ms); default is the push window. */
+  expiresAt?: number;
 }
 
-async function stillRelevant(db: Db, p: NotifyPayload, now: Date): Promise<boolean> {
+export async function stillRelevant(db: Db, p: NotifyPayload, now: Date): Promise<boolean> {
   const [member] = await db
     .select({ id: memberships.id })
     .from(memberships)
@@ -93,6 +95,8 @@ export async function processOutbox(db: Db, now = new Date(), limit = 50): Promi
                 sourceType: p.sourceType,
                 sourceId: p.sourceId,
                 dedupeKey: job.dedupeKey,
+                relevance: p,
+                pushExpiresAt: typeof p.expiresAt === "number" ? new Date(p.expiresAt) : null,
               })
               .onConflictDoNothing({ target: notifications.dedupeKey });
             stats.delivered++;

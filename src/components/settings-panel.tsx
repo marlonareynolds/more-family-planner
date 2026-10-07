@@ -77,6 +77,14 @@ export function SettingsPanel({
       <CalendarSettings calendars={calendars} connect={calendarConnect} />
       <CalendarOutSettings state={calendarOut} />
       <YourData analyticsOptOut={analyticsOptOut} />
+      <section>
+        <SectionTitle>Help</SectionTitle>
+        <Card>
+          <p className="text-sm text-ink-2">
+            Something not working, or a question about your data? <a className="font-medium text-brand underline" href="/support">Ask for help</a>. A person reads every message.
+          </p>
+        </Card>
+      </section>
       <Leaving household={household} />
     </div>
   );

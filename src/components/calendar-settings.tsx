@@ -55,12 +55,16 @@ async function syncNow(feedId: string): Promise<{ ok: boolean; error?: string; m
   }
 }
 
-async function disconnect(feedId: string, version: number): Promise<string | null> {
+async function disconnect(feedId: string, version: number, timeZone: string): Promise<string | null> {
   try {
     const res = await fetch(`/api/v1/calendar-feeds/${feedId}/disconnect`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version }) });
     const data = await res.json().catch(() => null);
     if (!res.ok) return data?.error?.message ?? "Couldn't disconnect just now.";
-    return data?.cleared === false ? "Disconnected. Some “Busy” blocks may still be in that calendar; you can delete them there." : null;
+    if (data?.cleared !== false) return null;
+    const left: { start: number; end: number }[] = data?.cleanup?.left ?? [];
+    if (!left.length) return "Disconnected, but More couldn't check that calendar. Any “Busy” blocks it added may still be there; you can delete them there.";
+    const when = left.slice(0, 6).map((b) => fmtDateTime(b.start, timeZone)).join("; ");
+    return `Disconnected. ${left.length} “Busy” ${left.length === 1 ? "block" : "blocks"} couldn't be removed and may still be in that calendar: ${when}${left.length > 6 ? " and more" : ""}. Delete them there.`;
   } catch {
     return "You seem to be offline.";
   }
@@ -87,7 +91,7 @@ export function CalendarSettings({ calendars, connect }: { calendars: CalendarVi
   const drop = async (c: CalendarView) => {
     if (c.provider === "ics") return run("RemoveCalendarFeed", { feedId: c.id, version: c.version });
     setBusyId(c.id);
-    setNote(await disconnect(c.id, c.version));
+    setNote(await disconnect(c.id, c.version, app.timeZone));
     setBusyId(null);
     router.refresh();
   };

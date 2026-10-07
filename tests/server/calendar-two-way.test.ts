@@ -173,3 +173,64 @@ describe("Outlook", () => {
     expect(seen[0].prefer).toBe('outlook.timezone="UTC"');
   });
 });
+
+describe("R09 disconnect reports cleanup honestly (BR-13, BR-14)", () => {
+  async function withBlocks(n = 2) {
+    const { w, feedId } = await googleFeed();
+    const g = fakeGoogle([]);
+    for (let i = 0; i < n; i++) await w.run(w.alex, "AddTrip", { ...trip, title: `Trip ${i}`, startDate: `2030-10-1${i}`, endDate: `2030-10-1${i}`, endTime: "20:00", travellerIds: [w.alex.accountId] });
+    await syncFeed(w.db, feedId, undefined, NOW, g.http);
+    expect(g.written.size).toBe(n);
+    return { w, feedId, g };
+  }
+  /** Wraps the fake so DELETE answers with `status` (0 = timeout). */
+  const failingDeletes = (http: HttpFetch, status: number): HttpFetch => async (url, init) => {
+    if ((init?.method ?? "GET") !== "DELETE") return http(url, init);
+    if (status === 0) throw new DOMException("timed out", "TimeoutError");
+    return new Response(null, { status });
+  };
+
+  it("a provider timeout leaves the blocks recorded and reported, not 'cleared'", async () => {
+    const { w, feedId, g } = await withBlocks();
+    const r = await clearPushedBusy(w.db, feedId, failingDeletes(g.http, 0), NOW);
+    expect(r).toMatchObject({ removed: 0, reason: "provider" });
+    expect(r.left).toHaveLength(2);
+    expect(r.left[0].start).toBe(Date.parse("2030-10-10T07:00:00Z"));
+    expect(await w.db.select().from(calendarPushes)).toHaveLength(2);
+  });
+
+  it("revoked permission reports every block as left, for manual removal", async () => {
+    const { w, feedId, g } = await withBlocks();
+    const r = await clearPushedBusy(w.db, feedId, failingDeletes(g.http, 401), NOW);
+    expect(r).toMatchObject({ removed: 0, reason: "permission" });
+    expect(r.left).toHaveLength(2);
+  });
+
+  it("a block already deleted at the provider counts as removed", async () => {
+    const { w, feedId, g } = await withBlocks();
+    const r = await clearPushedBusy(w.db, feedId, failingDeletes(g.http, 404), NOW);
+    expect(r).toEqual({ removed: 2, left: [], reason: null });
+  });
+
+  it("a lost encryption key asks to reconnect rather than failing silently", async () => {
+    const { w, feedId, g } = await withBlocks(1);
+    await w.db.update(calendarFeeds).set({ credentials: "v1.bad.bad.bad" }).where(eq(calendarFeeds.id, feedId));
+    expect(await syncFeed(w.db, feedId, undefined, NOW, g.http)).toMatchObject({ ok: false, error: "reconnect" });
+    expect(await clearPushedBusy(w.db, feedId, g.http, NOW)).toMatchObject({ reason: "permission", left: [expect.any(Object)] });
+  });
+
+  it("BR-14: a block written while the calendar is being disconnected is taken back out", async () => {
+    const { w, feedId } = await googleFeed();
+    const g = fakeGoogle([]);
+    await w.run(w.alex, "AddTrip", { ...trip, travellerIds: [w.alex.accountId] });
+    // The disconnect lands between the provider accepting the block and More recording it.
+    const racing: HttpFetch = async (url, init) => {
+      const res = await g.http(url, init);
+      if (init?.method === "POST") await w.db.delete(calendarFeeds).where(eq(calendarFeeds.id, feedId));
+      return res;
+    };
+    await w.db.delete(events).where(eq(events.feedId, feedId));
+    await syncFeed(w.db, feedId, undefined, NOW, racing).catch(() => null);
+    expect(g.written.size).toBe(0);
+  });
+});

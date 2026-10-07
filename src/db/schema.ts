@@ -628,10 +628,27 @@ export const notifications = pgTable(
     dedupeKey: text("dedupe_key").notNull().unique(),
     createdAt: created(),
     readAt: ts("read_at"),
-    /** Sent to the person's devices (or deliberately not, e.g. no device). */
+    /** When a push service accepted it for at least one device. Acceptance is not arrival. */
     pushedAt: ts("pushed_at"),
+    /**
+     * Push delivery state (R03): pending → leased → sent, or retry (bounded,
+     * backing off), failed, expired (too late to be useful), superseded (no
+     * longer true at send time) or skipped (push off, or no device).
+     */
+    pushState: text("push_state", { enum: ["pending", "leased", "sent", "retry", "failed", "expired", "superseded", "skipped"] }).notNull().default("pending"),
+    pushAttempts: smallint("push_attempts").notNull().default(0),
+    /** A worker's claim; a crashed worker's lease runs out and the next run takes over. */
+    pushLeaseUntil: ts("push_lease_until"),
+    pushNextAt: ts("push_next_at"),
+    pushExpiresAt: ts("push_expires_at"),
+    pushError: text("push_error"),
+    /** What to re-check just before sending: the source and its version. */
+    relevance: jsonb("relevance"),
   },
-  (t) => [index("notifications_owner").on(t.accountId, t.createdAt), index("notifications_unpushed").on(t.createdAt).where(sql`${t.pushedAt} is null`)],
+  (t) => [
+    index("notifications_owner").on(t.accountId, t.createdAt),
+    index("notifications_push_due").on(t.createdAt).where(sql`${t.pushState} in ('pending', 'leased', 'retry')`),
+  ],
 );
 
 /** A browser push subscription for one device (spec 13.2). */
@@ -943,3 +960,36 @@ export const weatherForecasts = pgTable("weather_forecasts", {
   /** Hourly points: { t: epoch ms, rain: % chance, mm, code: WMO, temp: °C }. */
   hours: jsonb("hours").notNull(),
 });
+
+// ── Operations ─────────────────────────────────────────────────────────────
+
+/**
+ * The last run of each scheduled job: when it started, when it last fully
+ * succeeded and the last error. Feeds the status page and alerts (R10).
+ */
+export const opsRuns = pgTable("ops_runs", {
+  name: text("name").primaryKey(),
+  lastStartedAt: ts("last_started_at"),
+  lastOkAt: ts("last_ok_at"),
+  lastErrorAt: ts("last_error_at"),
+  lastError: text("last_error"),
+  lastStats: jsonb("last_stats"),
+});
+
+/**
+ * Messages sent through the support page. The sender's own words; only the
+ * operator reads them. An account is attached only if they were signed in.
+ */
+export const supportRequests = pgTable(
+  "support_requests",
+  {
+    id: id(),
+    accountId: uuid("account_id").references(() => accounts.id),
+    contact: text("contact").notNull().default(""),
+    topic: text("topic", { enum: ["problem", "privacy", "idea", "other"] }).notNull(),
+    message: text("message").notNull(),
+    createdAt: created(),
+    handledAt: ts("handled_at"),
+  },
+  (t) => [index("support_requests_open").on(t.createdAt).where(sql`${t.handledAt} is null`)],
+);

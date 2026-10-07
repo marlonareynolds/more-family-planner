@@ -54,7 +54,7 @@ export async function queueLeaveReminders(db: Db, now = new Date()): Promise<{ q
             householdId: h.id,
             eventType: "notify",
             dedupeKey: `notify:event.leave:${o.eventId}:${o.row.version}:${o.start}:${a.id}`,
-            payload: { recipientId: a.id, kind: "event.leave", text, sourceType: "event", sourceId: o.eventId, sourceVersion: o.row.version, householdId: h.id, occurrenceStart: o.start },
+            payload: { recipientId: a.id, kind: "event.leave", text, sourceType: "event", sourceId: o.eventId, sourceVersion: o.row.version, householdId: h.id, occurrenceStart: o.start, expiresAt: leave },
             availableAt: new Date(remindAt),
           })
           .onConflictDoNothing({ target: outbox.dedupeKey })
