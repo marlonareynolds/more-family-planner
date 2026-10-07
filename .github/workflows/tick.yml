@@ -1,12 +1,9 @@
 name: Reminders and messages
-# Every 15 minutes, nudges the live app to deliver due reminders, phone
-# notifications (outside quiet hours) and the Sunday "week ahead" email.
-# Vercel's free plan only runs its own cron once a day, so this fills the gap.
-# Needs repository secrets MORE_APP_URL (e.g. https://more.example.com) and
-# CRON_SECRET (the same value as in Vercel). Without them the job says so and stops.
+# Manual only. The live schedule is Supabase cron (job "more-tick", every 5
+# minutes; see docs/restore.md "Losing a key" for its secret), which uses no
+# GitHub minutes. Run this by hand to nudge the app if that job is paused.
+# Needs repository secrets MORE_APP_URL and CRON_SECRET (same value as Vercel).
 on:
-  schedule:
-    - cron: "*/15 * * * *"
   workflow_dispatch:
 permissions:
   contents: read
