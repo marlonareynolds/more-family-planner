@@ -832,3 +832,31 @@ export const calendarExports = pgTable("calendar_exports", {
   createdAt: created(),
   lastFetchedAt: ts("last_fetched_at"),
 });
+
+// ── Trips and time away ────────────────────────────────────────────────────
+
+/**
+ * Time away from home: a work trip, a weekend with friends, or the whole
+ * family's holiday. One entry does the work: travellers show as away, and
+ * children left at home get care needs wherever no adult is left to cover.
+ * Logistics, so shared with the household.
+ */
+export const trips = pgTable(
+  "trips",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    organiserId: uuid("organiser_id").notNull().references(() => accounts.id),
+    kind: text("kind", { enum: ["work", "personal", "family"] }).notNull(),
+    title: text("title").notNull(),
+    destination: text("destination").notNull().default(""),
+    startAt: ts("start_at").notNull(),
+    endAt: ts("end_at").notNull(),
+    travellerIds: uuid("traveller_ids").array().notNull(),
+    childIds: uuid("child_ids").array().notNull().default(sql`'{}'::uuid[]`),
+    createdAt: created(),
+    cancelledAt: ts("cancelled_at"),
+    version: version(),
+  },
+  (t) => [index("trips_household_time").on(t.householdId, t.startAt)],
+);

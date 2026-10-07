@@ -4,8 +4,9 @@ import { HolidayBoard } from "@/components/holiday-board";
 import { mondayOf } from "@/components/format";
 import { loadWeek, requireHousehold } from "@/server/page-data";
 import { listHolidays } from "@/server/queries/holidays";
+import { upcomingTrips } from "@/server/queries/trips";
 
-export const metadata = { title: "Holidays and care" };
+export const metadata = { title: "Trips, holidays and care" };
 
 export default async function HolidaysPage(props: PageProps<"/holidays">) {
   const { date, archived } = await props.searchParams;
@@ -15,7 +16,7 @@ export default async function HolidaysPage(props: PageProps<"/holidays">) {
   const holidays = await listHolidays(db, household.id, { archived: showArchived });
   return (
     <AppProvider value={infoFrom(week)}>
-      <HolidayBoard week={week} holidays={holidays.holidays} showingArchived={showArchived} />
+      <HolidayBoard week={week} holidays={holidays.holidays} showingArchived={showArchived} trips={await upcomingTrips(db, household.id)} />
     </AppProvider>
   );
 }

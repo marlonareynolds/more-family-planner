@@ -34,7 +34,8 @@ import { addDays, instantToLocalDate, isWeekKey, startOfLocalDate, weekKeyFor } 
 import type { Actor } from "../auth";
 import type { PlaceView } from "@/lib/places";
 import { placesFor } from "./places";
-import { loadBusy, loadEventOccurrences } from "./busy";
+import { loadBusy, loadEventOccurrences, loadTrips } from "./busy";
+import { tripCareNeeds } from "@/domain/trips";
 import { STALE_AFTER_MS } from "../calendar-sync";
 import { bankHoliday } from "@/lib/bank-holidays";
 
@@ -232,6 +233,22 @@ export interface WeekView {
   planning: { weekKey: string; planned: boolean };
   /** The household's own local places, offered ahead of general ideas. */
   places: PlaceView[];
+  /** Time away overlapping this view, and the next family trip ahead. */
+  trips: TripView[];
+  nextFamilyTrip: TripView | null;
+}
+
+export interface TripView {
+  id: string;
+  kind: "work" | "personal" | "family";
+  title: string;
+  destination: string;
+  start: number;
+  end: number;
+  travellerIds: string[];
+  childIds: string[];
+  organiserId: string;
+  version: number;
 }
 
 function hiddenLabel(m: MomentView | undefined): string | null {
@@ -402,6 +419,30 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
   const requirements: Req[] = reqRows
     .filter((r) => kids.some((k) => k.id === r.childId))
     .map((r) => ({ id: r.id, childId: r.childId, start: r.startAt.getTime(), end: r.endAt.getTime(), reason: r.reason }));
+
+  // ── Time away: travellers are busy (above); children at home need care
+  // wherever no adult is left to look after them.
+  const tripRows = await loadTrips(db, household.id, horizon);
+  const tripsOut: TripView[] = tripRows.map((t) => ({
+    id: t.id,
+    kind: t.kind,
+    title: t.title,
+    destination: t.destination,
+    start: t.startAt.getTime(),
+    end: t.endAt.getTime(),
+    travellerIds: t.travellerIds.filter((id) => adultIds.includes(id)),
+    childIds: t.childIds.filter((id) => kids.some((k) => k.id === id)),
+    organiserId: t.organiserId,
+    version: t.version,
+  }));
+  const commitments = busy.filter((b) => b.sourceType === "event").map((b) => ({ personId: b.personId, start: b.start, end: b.end, childIds: b.childIds ?? [] }));
+  for (const t of tripsOut) {
+    const names = t.travellerIds.map((id) => adults.find((a) => a.id === id)?.displayName ?? "Someone");
+    const reason = `${names.join(" and ")} away`;
+    for (const need of tripCareNeeds({ trip: t, adultIds, childIds: kids.map((k) => k.id), commitments, reason, timeZone: tz })) {
+      if (need.end > horizon.start && need.start < horizon.end) requirements.push(need);
+    }
+  }
 
   const momentsOut: MomentView[] = [];
   for (const m of momentRows) {
@@ -632,6 +673,8 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     helpers: helperRows.map((h) => ({ id: h.id, name: h.name, relation: h.relation, phone: h.phone, version: h.version })),
     planning,
     places: await placesFor(db, household.id),
+    trips: tripsOut,
+    nextFamilyTrip: await nextFamilyTrip(db, household.id, now),
     markers: Object.fromEntries(dayList.flatMap((d) => {
       const name = bankHoliday(d, tz);
       return name ? [[d, name]] : [];
@@ -754,3 +797,12 @@ function buildAttention(input: {
 }
 
 export type { Busy };
+
+/** The next whole-family trip in the coming 90 days, for a countdown. */
+async function nextFamilyTrip(db: Db, householdId: string, now: Date): Promise<TripView | null> {
+  const rows = await loadTrips(db, householdId, { start: now.getTime() + 86_400_000, end: now.getTime() + 90 * 86_400_000 });
+  const t = rows.find((r) => r.kind === "family" && r.startAt.getTime() > now.getTime());
+  return t
+    ? { id: t.id, kind: t.kind, title: t.title, destination: t.destination, start: t.startAt.getTime(), end: t.endAt.getTime(), travellerIds: t.travellerIds, childIds: t.childIds, organiserId: t.organiserId, version: t.version }
+    : null;
+}

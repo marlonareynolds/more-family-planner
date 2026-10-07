@@ -94,6 +94,7 @@ export function WeekBoard({ week, mode = "week" }: { week: WeekView; mode?: "wee
                   {date === today ? "Today · " : ""}
                   {fmtDate(date)}
                   {week.markers[date] && <span className="ml-2 rounded-full bg-family-soft px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-family">{week.markers[date]}</span>}
+                  <AwayChips trips={week.trips} date={date} />
                 </h2>
                 <span className="flex items-center gap-2 text-sm text-ink-3">
                   Free
@@ -109,6 +110,7 @@ export function WeekBoard({ week, mode = "week" }: { week: WeekView; mode?: "wee
                   {date === today ? "Today · " : ""}
                   {fmtDate(date)}
                   {week.markers[date] && <span className="ml-2 rounded-full bg-family-soft px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-family">{week.markers[date]}</span>}
+                  <AwayChips trips={week.trips} date={date} />
                 </h2>
                 {mode === "week" && view === "agenda" && (
                   <button className="flex min-h-9 items-center gap-1 rounded-full px-2 text-sm text-brand hover:bg-brand-soft" onClick={() => setChooser(date)} aria-label={`Add on ${fmtDate(date)}`}><Plus aria-hidden size={15} />Add</button>
@@ -206,5 +208,23 @@ function CareRow({ g, date }: { g: WeekView["care"][number]["groups"][number]; d
         <p className="text-sm text-warn">Not covered {g.gaps.map((x) => fmtRange(x.start, x.end, app.timeZone)).join(", ")}</p>
       )}
     </Link>
+  );
+}
+
+/** Who's away on a day, and when they're back: one quiet chip per trip. */
+function AwayChips({ trips, date }: { trips: WeekView["trips"]; date: string }) {
+  const app = useApp();
+  return (
+    <>
+      {trips.map((t) => {
+        const s = localParts(t.start, app.timeZone);
+        const e = localParts(t.end, app.timeZone);
+        if (date < s.date || date > e.date) return null;
+        const everyone = t.travellerIds.length === app.adults.length && t.childIds.length === app.children.length;
+        const who = everyone ? t.title : t.travellerIds.map((id) => (id === app.me.id ? "You" : app.nameOf(id))).join(" and ");
+        const label = date === e.date && e.time !== "00:00" ? `${who} back ${e.time}` : date === s.date ? `${who} away from ${s.time}` : `${who} away`;
+        return <span key={t.id} className="ml-2 rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-ink-2">{label}</span>;
+      })}
+    </>
   );
 }

@@ -4,15 +4,16 @@ import { Backpack } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import type { HolidayRow } from "@/server/queries/holidays";
-import type { ArrangementView, WeekView } from "@/server/queries/week";
+import type { ArrangementView, TripView, WeekView } from "@/server/queries/week";
 import { useApp } from "./app-context";
 import { addDaysStr, fmtDate, fmtRange, localParts, todayIn } from "./format";
 import { PeoplePicker } from "./people-picker";
+import { TripsSection } from "./trips";
 import { SpanFields, defaultSpan, spanFrom, spanPayload, type SpanValue } from "./span-fields";
 import { Badge, Button, Card, Checkbox, Dialog, EmptyState, ErrorNote, Field, SectionTitle, inputClass } from "./ui";
 import { useCommand, type ApiError } from "./use-command";
 
-export function HolidayBoard({ week, holidays, showingArchived }: { week: WeekView; holidays: HolidayRow[]; showingArchived: boolean }) {
+export function HolidayBoard({ week, holidays, showingArchived, trips = [] }: { week: WeekView; holidays: HolidayRow[]; showingArchived: boolean; trips?: TripView[] }) {
   const app = useApp();
   const { run, pending, error } = useCommand(app.householdId);
   const [arranging, setArranging] = useState<{ childIds: string[]; span: SpanValue } | null>(null);
@@ -26,8 +27,8 @@ export function HolidayBoard({ week, holidays, showingArchived }: { week: WeekVi
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="font-display text-3xl">Holidays and care</h1>
-          <p className="mt-1 max-w-prose text-ink-2">Who is off, who needs care, and who has it. Children sharing the same care are shown together.</p>
+          <h1 className="font-display text-3xl">Trips, holidays and care</h1>
+          <p className="mt-1 max-w-prose text-ink-2">Who is away, who needs care, and who has it. Children sharing the same care are shown together.</p>
         </div>
         <div className="flex gap-2">
           <Button onClick={() => setArranging({ childIds: app.children.map((c) => c.id), span: defaultSpan(todayIn(app.timeZone), "09:00", "17:00") })}>Arrange care</Button>
@@ -62,7 +63,7 @@ export function HolidayBoard({ week, holidays, showingArchived }: { week: WeekVi
       </div>
       <ErrorNote message={error?.message} />
       {week.care.length === 0 ? (
-        <EmptyState icon={<Backpack />} tone="family" title="No care needed this week.">Care needs come from school holidays and from plans that need the children looked after.</EmptyState>
+        <EmptyState icon={<Backpack />} tone="family" title="No care needed this week.">Care needs come from school holidays, time away and plans that need the children looked after.</EmptyState>
       ) : (
         <div className="mt-3 flex flex-col gap-5">
           {week.care.map((day) => (
@@ -100,6 +101,8 @@ export function HolidayBoard({ week, holidays, showingArchived }: { week: WeekVi
           ))}
         </div>
       )}
+
+      <TripsSection trips={trips} />
 
       <SectionTitle action={<Link className="text-sm text-brand underline" href={showingArchived ? "/holidays" : "/holidays?archived=1"}>{showingArchived ? "Show current" : "Show archived"}</Link>}>
         {showingArchived ? "Archived holidays" : "School holidays"}
