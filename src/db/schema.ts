@@ -742,3 +742,91 @@ export const trialResponses = pgTable(
   },
   (t) => [uniqueIndex("trial_responses_owner_week").on(t.accountId, t.weekKey)],
 );
+
+// ── Shared load ────────────────────────────────────────────────────────────
+
+/**
+ * A recurring household job (bins, PE kit, school forms) with one agreed
+ * owner. Ownership changes by proposal: the person taking a job on says yes
+ * before it becomes theirs, so nobody is handed work silently.
+ */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    title: text("title").notNull(),
+    notes: text("notes").notNull().default(""),
+    cadence: text("cadence", { enum: ["once", "weekly", "fortnightly", "monthly", "yearly"] }).notNull(),
+    /** First due date; later ones follow the cadence (monthly: the same nth weekday). */
+    startsOn: date("starts_on").notNull(),
+    /** Remind the evening before (bins), not the morning of. */
+    remindDayBefore: boolean("remind_day_before").notNull().default(false),
+    /** A rough guess at the time it takes, for the "who carries what" view. */
+    minutes: smallint("minutes").notNull().default(15),
+    ownerId: uuid("owner_id").references(() => accounts.id),
+    proposedOwnerId: uuid("proposed_owner_id").references(() => accounts.id),
+    proposedBy: uuid("proposed_by").references(() => accounts.id),
+    createdBy: uuid("created_by").notNull().references(() => accounts.id),
+    createdAt: created(),
+    archivedAt: ts("archived_at"),
+    version: version(),
+  },
+  (t) => [index("jobs_household").on(t.householdId)],
+);
+
+/** One due date of a job marked done. */
+export const jobDone = pgTable(
+  "job_done",
+  {
+    jobId: uuid("job_id").notNull().references(() => jobs.id),
+    dueOn: date("due_on").notNull(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    doneBy: uuid("done_by").notNull().references(() => accounts.id),
+    doneAt: created(),
+  },
+  (t) => [primaryKey({ columns: [t.jobId, t.dueOn] })],
+);
+
+// ── Our places ─────────────────────────────────────────────────────────────
+
+/**
+ * Local places the household itself knows and likes. They are offered first
+ * in ideas and picks, ahead of the general catalogue, which nobody has
+ * checked for this area.
+ */
+export const places = pgTable(
+  "places",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    name: text("name").notNull(),
+    area: text("area").notNull().default(""),
+    kinds: text("kinds").array().notNull(),
+    category: text("category").notNull(),
+    setting: text("setting", { enum: ["home", "outdoors", "out-indoors"] }).notNull(),
+    notes: text("notes").notNull().default(""),
+    typicalCostMinor: money("typical_cost_minor").notNull().default(0),
+    durationMinutes: integer("duration_minutes").notNull().default(120),
+    stepFree: boolean("step_free").notNull().default(false),
+    calm: boolean("calm").notNull().default(false),
+    addedBy: uuid("added_by").notNull().references(() => accounts.id),
+    createdAt: created(),
+    archivedAt: ts("archived_at"),
+    version: version(),
+  },
+  (t) => [index("places_household").on(t.householdId)],
+);
+
+// ── Calendar out ───────────────────────────────────────────────────────────
+
+/**
+ * A private subscription link that puts this adult's More plans into their
+ * own calendar app. Only the hash is stored; a lost link is replaced.
+ */
+export const calendarExports = pgTable("calendar_exports", {
+  accountId: uuid("account_id").primaryKey().references(() => accounts.id),
+  tokenHash: text("token_hash").notNull().unique(),
+  createdAt: created(),
+  lastFetchedAt: ts("last_fetched_at"),
+});

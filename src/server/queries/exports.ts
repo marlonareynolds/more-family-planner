@@ -11,6 +11,8 @@ import {
   expenses,
   feedback,
   helpers,
+  jobs,
+  places,
   highlights,
   holidayPeriods,
   journalEntries,
@@ -118,6 +120,14 @@ export async function exportHousehold(db: Db, actor: Actor) {
       ended: r.endedAt,
     })),
     helpers: await db.select({ name: helpers.name, relation: helpers.relation, phone: helpers.phone }).from(helpers).where(and(eq(helpers.householdId, household.id), isNull(helpers.archivedAt))),
+    jobs: await db
+      .select({ title: jobs.title, notes: jobs.notes, cadence: jobs.cadence, startsOn: jobs.startsOn, ownerId: jobs.ownerId })
+      .from(jobs)
+      .where(and(eq(jobs.householdId, household.id), isNull(jobs.archivedAt))),
+    places: await db
+      .select({ name: places.name, area: places.area, kinds: places.kinds, notes: places.notes, typicalCostMinor: places.typicalCostMinor })
+      .from(places)
+      .where(and(eq(places.householdId, household.id), isNull(places.archivedAt))),
     holidays: await db.select().from(holidayPeriods).where(eq(holidayPeriods.householdId, household.id)),
     care: await db.select().from(careArrangements).where(eq(careArrangements.householdId, household.id)),
     expenses: visibleExpenses,

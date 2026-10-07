@@ -5,7 +5,7 @@ import type { WeekPick, WeekPicks } from "@/server/queries/picks";
 import { useApp } from "./app-context";
 import { fmtDate } from "./format";
 import { MomentEditor, type MomentKind } from "./moment-editor";
-import { Button, Card, SectionTitle } from "./ui";
+import { Badge, Button, Card, SectionTitle } from "./ui";
 
 export function careLine(p: WeekPick, kind: MomentKind, partnerName: string | null): string {
   if (p.carer.kind === "not_needed") return kind === "family" ? "Everyone's free" : kind === "us" ? "You're both free" : "You're free";
@@ -55,7 +55,7 @@ export function WeekPicksSection({ kind }: { kind: MomentKind }) {
           {data.picks.map((p) => (
             <li key={p.activity.key}>
               <Card tone={kind} className="flex h-full flex-col gap-2">
-                <h3 className="font-semibold leading-snug">{p.activity.title}</h3>
+                <h3 className="font-semibold leading-snug">{p.activity.title}{p.activity.local && <span className="ml-2 align-middle"><Badge tone="good">Your place</Badge></span>}</h3>
                 <p className="text-sm text-ink-2">{p.simpler && p.activity.simpler ? p.activity.simpler : p.activity.summary}</p>
                 {p.slot ? (
                   <p className="text-sm">
@@ -90,6 +90,7 @@ export function WeekPicksSection({ kind }: { kind: MomentKind }) {
             notes: planning.simpler && planning.activity.simpler ? planning.activity.simpler : planning.activity.summary,
             budgetMinor: planning.activity.typicalCostMinor || null,
             durationMinutes: planning.activity.durationMinutes,
+            location: planning.activity.location,
             slot: planning.slot ? { date: planning.slot.date, startTime: planning.slot.startTime, endTime: planning.slot.endTime, endDate: endDateOf(planning.slot) } : undefined,
           }}
         />

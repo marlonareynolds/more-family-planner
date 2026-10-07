@@ -32,6 +32,8 @@ import { summarise, type ExpenseSummary } from "@/domain/money";
 import { hiddenReason, isAgreed, latestDecision, readiness, stageLabel, type Decision, type ReadinessGap } from "@/domain/moments";
 import { addDays, instantToLocalDate, isWeekKey, startOfLocalDate, weekKeyFor } from "@/domain/time";
 import type { Actor } from "../auth";
+import type { PlaceView } from "@/lib/places";
+import { placesFor } from "./places";
 import { loadBusy, loadEventOccurrences } from "./busy";
 import { STALE_AFTER_MS } from "../calendar-sync";
 import { bankHoliday } from "@/lib/bank-holidays";
@@ -228,6 +230,8 @@ export interface WeekView {
   helpers: { id: string; name: string; relation: string; phone: string; version: number }[];
   /** The week the household is planning now, and whether it has been planned. */
   planning: { weekKey: string; planned: boolean };
+  /** The household's own local places, offered ahead of general ideas. */
+  places: PlaceView[];
 }
 
 function hiddenLabel(m: MomentView | undefined): string | null {
@@ -627,6 +631,7 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     rituals: ritualsOut,
     helpers: helperRows.map((h) => ({ id: h.id, name: h.name, relation: h.relation, phone: h.phone, version: h.version })),
     planning,
+    places: await placesFor(db, household.id),
     markers: Object.fromEntries(dayList.flatMap((d) => {
       const name = bankHoliday(d, tz);
       return name ? [[d, name]] : [];

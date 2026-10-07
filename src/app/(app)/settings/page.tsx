@@ -4,6 +4,7 @@ import { infoFrom } from "@/components/app-info";
 import { SettingsPanel } from "@/components/settings-panel";
 import { accounts } from "@/db/schema";
 import { loadRange } from "@/server/page-data";
+import { calendarLinkFor } from "@/server/queries/calendar-out";
 import { reachFor } from "@/server/queries/reach";
 
 export const metadata = { title: "Settings" };
@@ -22,6 +23,7 @@ export default async function SettingsPage() {
         calendars={view.calendars}
         reach={await reachFor(db, actor)}
         helpers={view.helpers}
+        calendarOut={await calendarLinkFor(db, actor)}
       />
     </AppProvider>
   );

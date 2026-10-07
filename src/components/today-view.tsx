@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useState } from "react";
 import type { WeekView } from "@/server/queries/week";
 import { useApp } from "./app-context";
+import type { JobsView } from "@/server/queries/jobs";
 import { CheckinDialog } from "./checkin-dialog";
+import { JobsToday } from "./jobs";
 import { mondayOf, todayIn } from "./format";
 import { MomentCard } from "./moment-card";
 import { RitualCard } from "./rituals";
@@ -12,7 +14,7 @@ import { WeekBoard } from "./week-board";
 import { Button, Card, EmptyState, SectionTitle } from "./ui";
 import { useCommand } from "./use-command";
 
-export function TodayView({ data }: { data: WeekView }) {
+export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
   const app = useApp();
   const { run } = useCommand(app.householdId);
   const [checkin, setCheckin] = useState(false);
@@ -84,6 +86,8 @@ export function TodayView({ data }: { data: WeekView }) {
           })}
         </ul>
       )}
+
+      {jobs && <JobsToday data={jobs} />}
 
       <SectionTitle action={<Link href="/week" className="text-sm text-brand underline">Whole week</Link>}>Today and tomorrow</SectionTitle>
       <WeekBoard week={twoDays} mode="today" />

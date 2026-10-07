@@ -10,5 +10,8 @@ import "./calendars";
 import "./reach";
 import "./rituals";
 import "./village";
+import "./jobs";
+import "./places";
+import "./calendar-out";
 
 export { executeCommand, commandNames } from "../pipeline";

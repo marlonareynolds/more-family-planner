@@ -43,6 +43,13 @@
       "when": 1791329884776,
       "tag": "0005_reach_rituals_village",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791361076936,
+      "tag": "0006_jobs_places_calendar_out",
+      "breakpoints": true
     }
   ]
 }

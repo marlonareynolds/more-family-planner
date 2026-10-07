@@ -6,13 +6,15 @@ import type { SuggestedTime } from "@/domain/free-time";
 import { choosePicks, pairSlots, slotMinutes } from "@/domain/picks";
 import { currentWeekKey } from "@/domain/time";
 import { matchActivities, type Activity, type AgeBand } from "@/lib/catalogue";
+import { placeActivities } from "@/lib/places";
 import type { Actor } from "../auth";
 import { freeTimesFor, heavyWeek } from "./free-time";
 import { guidanceFor } from "./learning";
+import { placesFor } from "./places";
 import { householdFor } from "./week";
 
 export interface WeekPick {
-  activity: Pick<Activity, "key" | "title" | "summary" | "simpler" | "typicalCostMinor" | "durationMinutes" | "weatherSensitive" | "backup" | "accessNotes" | "category">;
+  activity: Pick<Activity, "key" | "title" | "summary" | "simpler" | "typicalCostMinor" | "durationMinutes" | "weatherSensitive" | "backup" | "accessNotes" | "category" | "local" | "location">;
   /** Use the shorter version: a heavy week or the viewer asked for it. */
   simpler: boolean;
   slot: SuggestedTime | null;
@@ -54,7 +56,9 @@ export async function picksFor(
     .where(and(eq(moments.householdId, household.id), eq(moments.kind, kind), gt(moments.startAt, new Date(now.getTime() - 28 * 86_400_000)), ne(moments.lifecycle, "cancelled")));
   const recent = new Set(recentRows.map((r) => r.key).filter((k): k is string => !!k));
 
-  const candidates = matchActivities({ kind, childAgeBands: [...new Set(kids.map((k) => k.ageBand as AgeBand))] }).filter((a) => slotMinutes(a) !== null);
+  // The household's own places come first; the general catalogue fills in.
+  const own = placeActivities(await placesFor(db, household.id), kind);
+  const candidates = [...own, ...matchActivities({ kind, childAgeBands: [...new Set(kids.map((k) => k.ageBand as AgeBand))] })].filter((a) => slotMinutes(a) !== null);
   const chosen = choosePicks({ candidates, guidance, recent, lighterWeek, seed: `${household.id}:${currentWeekKey(household.timeZone, now.getTime())}`, count });
 
   const cache = new Map<number, Awaited<ReturnType<typeof freeTimesFor>>>();
@@ -90,6 +94,8 @@ export async function picksFor(
           backup: a.backup,
           accessNotes: a.accessNotes,
           category: a.category,
+          local: a.local,
+          location: a.location,
         },
         simpler: (lighterWeek || guidance[a.key]?.guidance === "simplify") && !!a.simpler,
         slot,

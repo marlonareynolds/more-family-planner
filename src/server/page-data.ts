@@ -34,12 +34,6 @@ export async function loadWeek(weekParam?: string | string[]) {
   return getWeek(db, actor, requested);
 }
 
-/** From today for `days` days, for Today and the upcoming lists. */
-export async function loadUpcoming(days: number) {
-  const { actor, db, household } = await requireHousehold();
-  return getProjection(db, actor, instantToLocalDate(Date.now(), household.timeZone), days);
-}
-
 /** A window around today, for lists that need recent history and what's next. */
 export async function loadRange(offsetDays: number, days: number) {
   const { actor, db, household } = await requireHousehold();

@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
-import { matchActivities, type Activity, type AgeBand, type Setting } from "@/lib/catalogue";
+import { CATALOGUE, matchActivities, type Activity, type AgeBand, type Setting } from "@/lib/catalogue";
+import { placeActivities } from "@/lib/places";
 import type { SuggestedTime } from "@/domain/free-time";
 import { useApp } from "./app-context";
 import { endDateOf } from "./week-picks";
@@ -49,6 +51,7 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
   }
   const bands = [...new Set(app.children.map((c) => c.ageBand as AgeBand))];
 
+  // The household's own places first, then the general starter ideas.
   const matches = matchActivities({
     kind,
     childAgeBands: bands,
@@ -59,7 +62,7 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
     calm,
     stepFree,
     maxMinutes: maxMinutes === "any" ? null : Number(maxMinutes),
-  });
+  }, [...placeActivities(app.places, kind), ...CATALOGUE]);
   const avoided = matches.filter((a) => guidance[a.key]?.guidance === "avoid");
   const shown = showHidden ? matches : matches.filter((a) => guidance[a.key]?.guidance !== "avoid");
 
@@ -116,6 +119,7 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="font-semibold">{a.title}</h3>
                     <span className="flex flex-wrap gap-1">
+                      {a.local && <Badge tone="good">Your place</Badge>}
                       {g?.guidance === "simplify" && <Badge tone="warn">Try it shorter</Badge>}
                       {g?.guidance === "avoid" && <Badge>Hidden for you</Badge>}
                     </span>
@@ -143,7 +147,10 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
           {showHidden ? "Hide" : "Show"} {avoided.length} idea{avoided.length === 1 ? "" : "s"} you asked to avoid
         </button>
       )}
-      <p className="mt-4 text-xs text-ink-3">Starter ideas for now, not yet reviewed by an expert. A suggestion is never a booking.</p>
+      <p className="mt-4 text-xs text-ink-3">
+        Your places come first. The rest are general starter ideas: nobody has checked them for your area, and they aren&apos;t expert-reviewed yet. A suggestion is never a booking.{" "}
+        <Link className="underline" href="/places">Add a place you like</Link>
+      </p>
       {planning && (
         <MomentEditor
           open
@@ -155,6 +162,7 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
             notes: lowEffort || guidance[planning.key]?.guidance === "simplify" ? (planning.simpler ?? planning.summary) : planning.summary,
             budgetMinor: planning.typicalCostMinor || null,
             durationMinutes: planning.durationMinutes,
+            location: planning.location,
             slot: slot ? { date: slot.date, startTime: slot.startTime, endTime: slot.endTime, endDate: endDateOf(slot) } : undefined,
           }}
           defaultDate={todayIn(app.timeZone)}

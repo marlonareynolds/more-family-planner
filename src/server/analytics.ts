@@ -26,6 +26,10 @@ export const PRODUCT_EVENT_TYPES = [
   "highlight_shared",
   "helper_asked",
   "setup_step",
+  "job_added",
+  "job_handed_over",
+  "place_added",
+  "calendar_linked",
 ] as const;
 export type ProductEventType = (typeof PRODUCT_EVENT_TYPES)[number];
 

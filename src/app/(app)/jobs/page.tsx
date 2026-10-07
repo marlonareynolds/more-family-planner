@@ -1,16 +1,16 @@
 import { AppProvider } from "@/components/app-context";
 import { infoFrom } from "@/components/app-info";
-import { TodayView } from "@/components/today-view";
+import { JobsBoard } from "@/components/jobs";
 import { loadRange } from "@/server/page-data";
 import { jobsFor } from "@/server/queries/jobs";
 
-export const metadata = { title: "Today" };
+export const metadata = { title: "Household jobs" };
 
-export default async function TodayPage() {
-  const { view, db, actor } = await loadRange(0, 14);
+export default async function JobsPage() {
+  const { view, db, actor } = await loadRange(0, 1);
   return (
     <AppProvider value={infoFrom(view)}>
-      <TodayView data={view} jobs={await jobsFor(db, actor)} />
+      <JobsBoard data={await jobsFor(db, actor)} />
     </AppProvider>
   );
 }

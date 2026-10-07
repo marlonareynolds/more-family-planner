@@ -109,8 +109,28 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   await go(sam, "/me");
   await expect(sam.getByText(`Private thought ${tag}`)).toHaveCount(0);
 
+  // A household job, asked of Sam, who says yes
+  await go(alex, "/jobs");
+  await axe(alex);
+  await alex.getByRole("button", { name: "+ Bins out" }).click();
+  await alex.getByText(`Ask Sam ${tag}`).click();
+  await alex.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
+  await expect(alex.getByText(/asked Sam/)).toBeVisible();
+  await go(sam, "/today");
+  await sam.getByRole("button", { name: "Yes, it's mine" }).click();
+  await go(sam, "/jobs");
+  await expect(sam.getByText("Yours").first()).toBeVisible();
+
+  // One of our places shows first in ideas
+  await go(alex, "/places");
+  await axe(alex);
+  await alex.getByRole("button", { name: "+ Add a place" }).click();
+  await alex.getByLabel("Name").fill("The Boathouse");
+  await alex.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
+  await expect(alex.getByRole("heading", { name: "The Boathouse" })).toBeVisible();
+
   // Remaining screens render and pass axe
-  for (const path of ["/today", "/family", "/holidays", "/plan", "/look-back"]) {
+  for (const path of ["/today", "/family", "/holidays", "/plan", "/look-back", "/settings"]) {
     await go(sam, path);
     await expect(sam.locator("main")).toBeVisible();
     await axe(sam);

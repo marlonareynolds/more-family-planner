@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReachSettings } from "@/server/queries/reach";
+import { CalendarOutSettings, type CalendarOutState } from "./calendar-out";
 import { HelpersSettings } from "./helpers-settings";
 import { ReachSettingsPanel } from "./reach-settings";
 import { useState } from "react";
@@ -43,6 +44,7 @@ export function SettingsPanel({
   calendars,
   reach,
   helpers,
+  calendarOut,
 }: {
   household: WeekView["household"];
   openInvite: WeekView["openInvite"];
@@ -52,6 +54,7 @@ export function SettingsPanel({
   calendars: WeekView["calendars"];
   reach: ReachSettings;
   helpers: WeekView["helpers"];
+  calendarOut: CalendarOutState | null;
 }) {
   return (
     <div className="max-w-2xl">
@@ -63,6 +66,7 @@ export function SettingsPanel({
       <Children kids={kids} />
       <HelpersSettings helpers={helpers} />
       <CalendarSettings calendars={calendars} />
+      <CalendarOutSettings state={calendarOut} />
       <YourData analyticsOptOut={analyticsOptOut} />
       <Leaving household={household} />
     </div>

@@ -56,6 +56,7 @@ export function PlanWeekFlow({ week, picks }: { week: WeekView; picks: Partial<R
         title: pick.activity.title,
         activityKey: pick.activity.key,
         notes: pick.simpler && pick.activity.simpler ? pick.activity.simpler : pick.activity.summary,
+        location: pick.activity.location ?? "",
         span: { allDay: false, startDate: slot.date, startTime: slot.startTime, endDate: endDateOf(slot), endTime: slot.endTime },
         participantIds: kind === "me" ? [app.me.id] : app.adults.map((a) => a.id),
         childIds: kind === "family" ? app.children.map((c) => c.id) : [],
@@ -140,7 +141,7 @@ export function PlanWeekFlow({ week, picks }: { week: WeekView; picks: Partial<R
                   <label key={p.activity.key} className={`flex cursor-pointer gap-3 rounded-2xl border p-3 ${choice[k] === i ? "border-brand bg-brand-soft" : "border-line"}`}>
                     <input type="radio" name={`pick-${k}`} className="mt-1" checked={choice[k] === i} onChange={() => setChoice({ ...choice, [k]: i })} />
                     <span className="min-w-0">
-                      <span className="block font-medium">{p.activity.title}</span>
+                      <span className="block font-medium">{p.activity.title}{p.activity.local && <span className="ml-2 align-middle"><Badge tone="good">Your place</Badge></span>}</span>
                       <span className="block text-sm">{fmtDate(p.slot.date)} · {p.slot.startTime}–{p.slot.endTime} · {costLine(p.activity.typicalCostMinor)}</span>
                       <span className={`block text-sm ${p.carer.kind === "helper" || p.carer.kind === "none" ? "text-warn" : "text-ink-3"}`}>{careLine(p, k, partner?.displayName ?? null)}</span>
                       {p.activity.weatherSensitive && p.activity.backup && <span className="block text-xs text-ink-3">If it rains: {p.activity.backup}</span>}

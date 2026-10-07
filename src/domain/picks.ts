@@ -33,6 +33,8 @@ export function choosePicks(input: PickInput): Activity[] {
       let score = (hash(`${input.seed}:${a.key}`) % 1000) / 1000;
       if (input.guidance[a.key]?.guidance === "allow") score += 1.5;
       if (input.recent.has(a.key)) score -= 3;
+      // A place the family already knows and likes beats a general idea.
+      if (a.local) score += 1;
       if (input.lighterWeek) score += a.preparation === "low" ? 1 : a.simpler ? 0.3 : -1;
       return { a, score };
     })

@@ -22,6 +22,7 @@ import { defineCommand, assertVersion, type CommandContext } from "../pipeline";
 import { currentAdults, release, requiredText, supersedeDeliveries } from "./helpers";
 import { disconnectFeed } from "./calendars";
 import { endRitualRow } from "./rituals";
+import { releaseJobsOf } from "./jobs";
 
 /** The supported household shape for this release (spec 3.2, D-02). */
 export const MAX_ADULTS = 2;
@@ -163,6 +164,8 @@ async function detachAdult(ctx: CommandContext, accountId: string, reason: strin
     .from(rituals)
     .where(and(eq(rituals.householdId, household.id), isNull(rituals.endedAt), arrayContains(rituals.participantIds, [accountId])));
   for (const r of theirs) await endRitualRow(ctx, r.id);
+  // Their household jobs go back to the shared list.
+  await releaseJobsOf(ctx, accountId);
 
   // Calendar links go with the adult: their imported copies leave too.
   const feeds = await tx.select({ id: calendarFeeds.id }).from(calendarFeeds).where(and(eq(calendarFeeds.householdId, household.id), eq(calendarFeeds.accountId, accountId)));

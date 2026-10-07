@@ -11,7 +11,19 @@
 export type AgeBand = "0-4" | "5-7" | "8-11" | "12-15" | "16+";
 export type Setting = "home" | "outdoors" | "out-indoors";
 export type Effort = "low" | "medium" | "high";
-export type Category = "theatre" | "food" | "music" | "art" | "outdoors" | "cosy" | "active" | "making" | "ritual";
+export const CATEGORIES = ["food", "outdoors", "active", "art", "theatre", "music", "making", "cosy", "ritual"] as const;
+export type Category = (typeof CATEGORIES)[number];
+export const CATEGORY_LABEL: Record<Category, string> = {
+  food: "Food and drink",
+  outdoors: "Outdoors",
+  active: "Active",
+  art: "Museums and art",
+  theatre: "Shows and films",
+  music: "Music",
+  making: "Making things",
+  cosy: "Cosy",
+  ritual: "Little rituals",
+};
 
 export interface Activity {
   key: string;
@@ -33,6 +45,10 @@ export interface Activity {
   /** A shorter, easier version for low-energy weeks. */
   simpler?: string;
   backup?: string;
+  /** One of the household's own places, not the general catalogue. */
+  local?: boolean;
+  /** Where it is, for a household place. */
+  location?: string;
   owner: string;
   reviewBy: string;
 }
@@ -117,8 +133,8 @@ export interface CatalogueFilter {
 }
 
 /** Honest matching: hard constraints filter, never re-rank around them. */
-export function matchActivities(f: CatalogueFilter): Activity[] {
-  return CATALOGUE.filter((a) => {
+export function matchActivities(f: CatalogueFilter, list: readonly Activity[] = CATALOGUE): Activity[] {
+  return list.filter((a) => {
     if (a.kind !== f.kind) return false;
     if (f.kind === "family" && f.childAgeBands?.length && a.ages && !f.childAgeBands.every((b) => a.ages!.includes(b))) return false;
     if (f.maxCostMinor !== undefined && f.maxCostMinor !== null && a.typicalCostMinor > f.maxCostMinor) return false;

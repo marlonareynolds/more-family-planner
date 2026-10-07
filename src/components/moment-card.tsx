@@ -6,6 +6,7 @@ import { useApp, useNow } from "./app-context";
 import { fmtDateTime, fmtMoney, fmtRange, fmtTime, localParts, minorToInput, toMinor } from "./format";
 import { AskHelperDialog } from "./ask-helper";
 import { MomentEditor } from "./moment-editor";
+import { PlaceEditor } from "./places";
 import { Badge, Button, Card, Checkbox, Dialog, ErrorNote, Field, inputClass } from "./ui";
 import { useCommand } from "./use-command";
 
@@ -28,6 +29,12 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
   const [taskOwner, setTaskOwner] = useState(app.me.id);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [asking, setAsking] = useState(false);
+  const [savingPlace, setSavingPlace] = useState(false);
+  // A good outing can become one of the household's places in one tap.
+  const placeName = (m.location || m.title).split(",")[0].trim();
+  const canSavePlace =
+    m.lifecycle === "completed" && !m.detailsHidden && !m.activityKey?.startsWith("place:") && !!placeName &&
+    !app.places.some((p) => p.name.toLowerCase() === placeName.toLowerCase());
 
   const now = useNow();
   const tone = m.momentKind;
@@ -162,6 +169,7 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
           {(m.lifecycle === "draft" || m.lifecycle === "planned") && !m.detailsHidden && <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>}
           {m.lifecycle === "planned" && past && <Button size="sm" variant="primary" onClick={() => run("CompleteMoment", { momentId: m.id, version: m.version })}>It happened</Button>}
           {m.lifecycle === "completed" && !m.myFeedbackSaved && <Button size="sm" variant="primary" onClick={() => setReflecting(true)}>Reflect privately</Button>}
+          {canSavePlace && <Button size="sm" variant="ghost" onClick={() => setSavingPlace(true)}>Save to our places</Button>}
           {m.lifecycle !== "cancelled" && !m.detailsHidden && <Button size="sm" variant="ghost" onClick={() => setCostOpen(true)}>{expense ? "Costs" : "Add cost"}</Button>}
           {m.lifecycle === "draft" && m.organiserId === app.me.id && (
             <Button size="sm" variant="ghost" onClick={() => run("DeleteDraft", { momentId: m.id, version: m.version })}>Delete draft</Button>
@@ -182,6 +190,13 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
 
       {editing && <MomentEditor open onClose={() => setEditing(false)} moment={m} defaultDate={date} />}
       {reflecting && <ReflectDialog moment={m} onClose={() => setReflecting(false)} />}
+      {savingPlace && (
+        <PlaceEditor
+          place={null}
+          initial={{ name: placeName, area: m.location.split(",").slice(1).join(",").trim(), kinds: [m.momentKind], typicalCostMinor: m.budgetMinor ?? 0, durationMinutes: Math.min(1440, Math.max(15, Math.round((m.end - m.start) / 60_000))) }}
+          onClose={() => setSavingPlace(false)}
+        />
+      )}
       {costOpen && <CostDialog moment={m} expense={expense ?? null} onClose={() => setCostOpen(false)} />}
       {asking && (
         <AskHelperDialog

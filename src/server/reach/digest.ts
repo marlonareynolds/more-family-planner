@@ -3,6 +3,7 @@ import type { Db } from "@/db/client";
 import { accounts, emailSends, households, memberships, weekPlans } from "@/db/schema";
 import { weekAheadDue } from "@/domain/reach";
 import { fmtDate, localParts } from "@/components/format";
+import { jobLinesFor } from "../jobs";
 import { getWeek, type WeekView } from "../queries/week";
 import { appUrl, emailTransport, escapeHtml, type Email } from "./email";
 
@@ -11,7 +12,7 @@ import { appUrl, emailTransport, escapeHtml, type Email } from "./email";
  * built from exactly what that adult can see in the app.
  */
 
-export function weekAheadEmail(view: WeekView, to: string, planned: boolean): Email {
+export function weekAheadEmail(view: WeekView, to: string, planned: boolean, myJobs: string[] = []): Email {
   const tz = view.household.timeZone;
   const url = appUrl();
   const when = (ms: number) => {
@@ -28,6 +29,7 @@ export function weekAheadEmail(view: WeekView, to: string, planned: boolean): Em
   if (agreed.length) sections.push({ title: "Agreed", lines: agreed.map((m) => `${m.title}, ${when(m.start)}${m.ready ? "" : " (not quite ready yet)"}`) });
   if (gaps.length) sections.push({ title: "Childcare still to sort", lines: [...new Set(gaps)] });
   if (dates.length) sections.push({ title: "Coming up", lines: dates });
+  if (myJobs.length) sections.push({ title: "Your jobs", lines: myJobs });
   const markers = Object.entries(view.markers).map(([d, name]) => `${fmtDate(d)}: ${name}`);
   if (markers.length) sections.push({ title: "Bank holidays", lines: markers });
 
@@ -82,7 +84,7 @@ export async function sendWeeklyDigests(db: Db, now = new Date(), limit = 100): 
     try {
       const view = await getWeek(db, { accountId: r.accountId, displayName: r.displayName }, weekKey, now);
       const [plan] = await db.select().from(weekPlans).where(and(eq(weekPlans.householdId, r.householdId), eq(weekPlans.weekKey, weekKey)));
-      const ok = await send(weekAheadEmail(view, r.email, !!plan));
+      const ok = await send(weekAheadEmail(view, r.email, !!plan, await jobLinesFor(db, r.householdId, r.accountId, view.days)));
       if (!ok) throw new Error("send failed");
       stats.sent++;
     } catch {
