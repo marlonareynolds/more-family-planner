@@ -9,7 +9,7 @@ import { addDays, localToInstantCompatible } from "@/domain/time";
 import { Temporal } from "@js-temporal/polyfill";
 import { defineCommand, assertVersion, type CommandContext } from "../pipeline";
 import { loadBusy } from "../queries/busy";
-import { assertPeople, dateString, release, requiredText, reserve, resolveSpan, shortText, spanSchema, timeString } from "./helpers";
+import { assertPeople, currentAdults, dateString, release, requiredText, reserve, resolveSpan, shortText, spanSchema, timeString } from "./helpers";
 
 /**
  * Holidays, childcare and handovers (spec 8.8). Arrangements use arbitrary
@@ -311,7 +311,17 @@ export const respondToCare = defineCommand({
         .update(careArrangements)
         .set({ state: "confirmed", confirmedBy: ctx.actor.accountId, confirmedAt: ctx.now, version: sql`${careArrangements.version} + 1` })
         .where(eq(careArrangements.id, a.id));
+      // Taking over from the other parent (R08): their promise ends only now
+      // that someone has said yes, so the children are never left uncovered.
+      const original = await replaced(ctx, a.replacesId);
+      if (original) {
+        await release(ctx.tx, "care", original.id);
+        const [retired] = await ctx.tx.update(careArrangements).set({ state: "declined", version: sql`${careArrangements.version} + 1` }).where(eq(careArrangements.id, original.id)).returning();
+        await notifyAdults(ctx, [original.responsibleAccountId!], "care.taken_over", retired, `${ctx.actor.displayName} will look after the children instead, ${await whenOf(ctx, original.startAt)}.`);
+      }
     } else {
+      const original = await replaced(ctx, a.replacesId);
+      if (original) await notifyAdults(ctx, [original.responsibleAccountId!], "care.not_taken_over", original, `${ctx.actor.displayName} can't take over looking after the children, ${await whenOf(ctx, original.startAt)}. You're still down for it.`);
       // Declining a specific responsibility is separate from a general
       // capacity change; the gap reappears for the family to resolve (spec 8.3).
       await release(ctx.tx, "care", a.id);
@@ -339,6 +349,8 @@ export const removeCare = defineCommand({
       .from(expenses)
       .where(and(eq(expenses.sourceType, "care"), eq(expenses.sourceId, a.id)));
     await release(ctx.tx, "care", a.id);
+    await release(ctx.tx, "drop_off", a.id);
+    await release(ctx.tx, "collect", a.id);
     if (cost) {
       // Keep the record (and its money history); mark it no longer relied on.
       await ctx.tx
@@ -353,6 +365,184 @@ export const removeCare = defineCommand({
         .set({ state: "declined", version: sql`${careArrangements.version} + 1` })
         .where(eq(careArrangements.id, a.id));
     }
+    await ctx.bumpSchedule();
+    return { arrangementId: a.id };
+  },
+});
+
+// ── Reviewing a promise, and named handovers (review R08) ─────────────────
+
+/** The confirmed parent care a replacement would take over, if it still stands. */
+async function replaced(ctx: CommandContext, id: string | null) {
+  if (!id) return null;
+  const [o] = await ctx.tx.select().from(careArrangements).where(and(eq(careArrangements.id, id), eq(careArrangements.householdId, ctx.household.id)));
+  return o && o.state === "confirmed" && o.kind === "parent" ? o : null;
+}
+
+async function whenOf(ctx: CommandContext, at: Date): Promise<string> {
+  return new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: ctx.household.timeZone }).format(at);
+}
+
+/** A neutral notice about shared logistics. It never carries anyone's private reason. */
+async function notifyAdults(ctx: CommandContext, recipientIds: readonly string[], kind: string, a: { id: string; version: number }, text: string) {
+  for (const recipientId of recipientIds) {
+    if (recipientId === ctx.actor.accountId) continue;
+    await ctx.emit("notify", `notify:${kind}:${a.id}:${a.version}:${recipientId}`, {
+      recipientId,
+      kind,
+      text,
+      sourceType: "care",
+      sourceId: a.id,
+      sourceVersion: a.version,
+      householdId: ctx.household.id,
+    });
+  }
+}
+
+async function othersThan(ctx: CommandContext, accountId: string): Promise<string[]> {
+  return (await currentAdults(ctx.tx, ctx.household.id)).map((a) => a.id).filter((id) => id !== accountId);
+}
+
+/**
+ * The named parent looks again at care they promised (R08). Only they can,
+ * and only for care still ahead. Nothing here is inferred from a check-in:
+ * the choice is theirs, and no reason is asked for or passed on.
+ * - keep: nothing changes, and nobody is told.
+ * - hand_over: the other adult is asked to take it over. The original promise
+ *   stands until they say yes, so the children are never left uncovered.
+ * - withdraw: the promise ends now, the gap shows again for the family, and
+ *   the other adult is told the care is needed again.
+ */
+export const reviewCare = defineCommand({
+  name: "ReviewCare",
+  scope: "household",
+  payload: z.object({ arrangementId: z.uuid(), version: z.number().int(), choice: z.enum(["keep", "hand_over", "withdraw"]) }),
+  async handler(ctx, p) {
+    const a = await loadArrangement(ctx, p.arrangementId, p.version);
+    if (a.kind !== "parent" || a.responsibleAccountId !== ctx.actor.accountId) throw new DomainError("FORBIDDEN", "Only the parent looking after the children can change this.");
+    if (a.state !== "confirmed") throw new DomainError("VALIDATION", "This care isn't agreed yet.");
+    if (a.endAt.getTime() <= ctx.now.getTime()) throw new DomainError("VALIDATION", "This care has already happened.");
+    if (p.choice === "keep") return { arrangementId: a.id, state: a.state };
+
+    const when = await whenOf(ctx, a.startAt);
+    if (p.choice === "hand_over") {
+      const [partner] = await othersThan(ctx, ctx.actor.accountId);
+      if (!partner) throw new DomainError("VALIDATION", "There's no one else in the household to ask.");
+      const [open] = await ctx.tx
+        .select({ id: careArrangements.id })
+        .from(careArrangements)
+        .where(and(eq(careArrangements.replacesId, a.id), eq(careArrangements.state, "proposed")));
+      if (open) return { arrangementId: a.id, replacementId: open.id, state: a.state };
+      const [r] = await ctx.tx
+        .insert(careArrangements)
+        .values({
+          householdId: ctx.household.id,
+          kind: "parent",
+          responsibleAccountId: partner,
+          childIds: a.childIds,
+          startAt: a.startAt,
+          endAt: a.endAt,
+          state: "proposed",
+          createdBy: ctx.actor.accountId,
+          replacesId: a.id,
+        })
+        .returning();
+      await notifyAdults(ctx, [partner], "care.asked", r, `${ctx.actor.displayName} asked if you can look after the children instead, ${when}.`);
+      await ctx.bumpSchedule();
+      await ctx.audit("care.hand_over", "care", a.id);
+      return { arrangementId: a.id, replacementId: r.id, state: a.state };
+    }
+
+    await release(ctx.tx, "care", a.id);
+    const [w] = await ctx.tx.update(careArrangements).set({ state: "declined", version: sql`${careArrangements.version} + 1` }).where(eq(careArrangements.id, a.id)).returning();
+    await notifyAdults(ctx, await othersThan(ctx, ctx.actor.accountId), "care.withdrawn", w, `${ctx.actor.displayName} can no longer look after the children, ${when}. Care is needed again.`);
+    await ctx.bumpSchedule();
+    await ctx.audit("care.withdraw", "care", a.id);
+    return { arrangementId: a.id, state: w.state };
+  },
+});
+
+const LEG_LABEL = { drop_off: "drop-off", collect: "collection" } as const;
+type Leg = keyof typeof LEG_LABEL;
+
+/** A handover occupies its adult for the journey there and back. */
+function legWindow(a: { startAt: Date; endAt: Date; handoverMinutes: number }, leg: Leg) {
+  const at = (leg === "drop_off" ? a.startAt : a.endAt).getTime();
+  const m = a.handoverMinutes * 60_000;
+  return { start: at - m, end: at + m };
+}
+
+function legFields(leg: Leg, by: string | null, agreed: boolean) {
+  return leg === "drop_off" ? { dropOffBy: by, dropOffAgreed: agreed } : { collectBy: by, collectAgreed: agreed };
+}
+
+/**
+ * Named handovers for care by someone outside the household: who takes the
+ * children there and who collects them. Naming yourself agrees on the spot;
+ * naming the other adult asks them. Either way it reserves the journey, so a
+ * clash shows up like any other.
+ */
+export const setHandover = defineCommand({
+  name: "SetHandover",
+  scope: "household",
+  payload: z.object({
+    arrangementId: z.uuid(),
+    version: z.number().int(),
+    leg: z.enum(["drop_off", "collect"]),
+    accountId: z.uuid().nullable(),
+    minutes: z.number().int().min(0).max(120).optional(),
+  }),
+  async handler(ctx, p) {
+    const a = await loadArrangement(ctx, p.arrangementId, p.version);
+    if (a.kind !== "external" || a.state === "declined") throw new DomainError("VALIDATION", "Drop-off and collection are for care by someone outside the household.");
+    if (p.accountId) await assertPeople(ctx, [p.accountId], []);
+    const before = p.leg === "drop_off" ? { by: a.dropOffBy, agreed: a.dropOffAgreed } : { by: a.collectBy, agreed: a.collectAgreed };
+    const minutes = p.minutes ?? a.handoverMinutes;
+    const win = legWindow({ ...a, handoverMinutes: minutes }, p.leg);
+    await release(ctx.tx, p.leg, a.id);
+    const self = p.accountId === ctx.actor.accountId;
+    if (self) {
+      await assertParentFree(ctx, ctx.actor.accountId, win.start, win.end, a.id);
+      await reserve(ctx.tx, ctx.household.id, p.leg, a.id, [ctx.actor.accountId], win.start, win.end);
+    }
+    const [u] = await ctx.tx
+      .update(careArrangements)
+      .set({ ...legFields(p.leg, p.accountId, self), handoverMinutes: minutes, version: sql`${careArrangements.version} + 1` })
+      .where(eq(careArrangements.id, a.id))
+      .returning();
+    const when = await whenOf(ctx, p.leg === "drop_off" ? a.startAt : a.endAt);
+    if (p.accountId && !self) {
+      await notifyAdults(ctx, [p.accountId], "care.handover_asked", u, `${ctx.actor.displayName} asked if you can do the ${LEG_LABEL[p.leg]}, ${when}.`);
+    } else if (before.by === ctx.actor.accountId && before.agreed && !self) {
+      // Stepping back from a handover you'd agreed: the others need to know.
+      await notifyAdults(ctx, await othersThan(ctx, ctx.actor.accountId), "care.handover_dropped", u, `${ctx.actor.displayName} can't do the ${LEG_LABEL[p.leg]} any more, ${when}. Someone is still needed.`);
+    }
+    await ctx.bumpSchedule();
+    return { arrangementId: a.id };
+  },
+});
+
+export const respondToHandover = defineCommand({
+  name: "RespondToHandover",
+  scope: "household",
+  payload: z.object({ arrangementId: z.uuid(), version: z.number().int(), leg: z.enum(["drop_off", "collect"]), decision: z.enum(["agree", "decline"]) }),
+  async handler(ctx, p) {
+    const a = await loadArrangement(ctx, p.arrangementId, p.version);
+    const by = p.leg === "drop_off" ? a.dropOffBy : a.collectBy;
+    const agreed = p.leg === "drop_off" ? a.dropOffAgreed : a.collectAgreed;
+    if (by !== ctx.actor.accountId || agreed || a.state === "declined") throw new DomainError("FORBIDDEN", "This isn't waiting for you.");
+    const when = await whenOf(ctx, p.leg === "drop_off" ? a.startAt : a.endAt);
+    if (p.decision === "agree") {
+      const win = legWindow(a, p.leg);
+      await assertParentFree(ctx, ctx.actor.accountId, win.start, win.end, a.id);
+      await reserve(ctx.tx, ctx.household.id, p.leg, a.id, [ctx.actor.accountId], win.start, win.end);
+    }
+    const [u] = await ctx.tx
+      .update(careArrangements)
+      .set({ ...(p.decision === "agree" ? legFields(p.leg, by, true) : legFields(p.leg, null, false)), version: sql`${careArrangements.version} + 1` })
+      .where(eq(careArrangements.id, a.id))
+      .returning();
+    if (p.decision === "decline") await notifyAdults(ctx, await othersThan(ctx, ctx.actor.accountId), "care.handover_declined", u, `${ctx.actor.displayName} can't do the ${LEG_LABEL[p.leg]}, ${when}. Someone is still needed.`);
     await ctx.bumpSchedule();
     return { arrangementId: a.id };
   },

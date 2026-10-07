@@ -6,7 +6,7 @@ import { useState } from "react";
 import type { HolidayRow } from "@/server/queries/holidays";
 import type { ArrangementView, TripView, WeekView } from "@/server/queries/week";
 import { useApp } from "./app-context";
-import { addDaysStr, fmtDate, fmtRange, localParts, todayIn } from "./format";
+import { addDaysStr, fmtDate, fmtRange, fmtTime, localParts, todayIn } from "./format";
 import { PeoplePicker } from "./people-picker";
 import { TripsSection } from "./trips";
 import { SpanFields, defaultSpan, spanFrom, spanPayload, type SpanValue } from "./span-fields";
@@ -18,6 +18,7 @@ export function HolidayBoard({ week, holidays, showingArchived, trips = [] }: { 
   const { run, pending, error } = useCommand(app.householdId);
   const [arranging, setArranging] = useState<{ childIds: string[]; span: SpanValue } | null>(null);
   const [editing, setEditing] = useState<HolidayRow | "new" | null>(null);
+  const [reviewing, setReviewing] = useState<ArrangementView | null>(null);
 
   const careLabel = (a: ArrangementView) => (a.kind === "parent" ? (a.responsibleAccountId === app.me.id ? "You" : app.nameOf(a.responsibleAccountId!)) : a.kind === "external" ? a.providerName : "No separate care needed");
   const stateLabel = (a: ArrangementView) =>
@@ -37,18 +38,47 @@ export function HolidayBoard({ week, holidays, showingArchived, trips = [] }: { 
       </div>
       {app.children.length === 0 && <p className="mt-4 rounded-xl bg-surface-2 px-3 py-2 text-sm">Add your children in <Link className="underline" href="/settings">Settings</Link> first.</p>}
 
-      {week.careAwaitingMe.length > 0 && (
+      {week.careAwaitingMe.length + week.handoversAwaitingMe.length > 0 && (
         <>
           <SectionTitle>Asked of you</SectionTitle>
           <ul className="flex flex-col gap-2">
             {week.careAwaitingMe.map((a) => (
               <li key={a.id}>
                 <Card tone="care" className="flex flex-wrap items-center justify-between gap-3">
-                  <p>Look after {a.childIds.map(app.childName).join(", ")} · {fmtDate(localParts(a.start, app.timeZone).date)} {fmtRange(a.start, a.end, app.timeZone)}</p>
+                  <p>{a.replacesId ? "Take over looking after" : "Look after"} {a.childIds.map(app.childName).join(", ")} · {fmtDate(localParts(a.start, app.timeZone).date)} {fmtRange(a.start, a.end, app.timeZone)}</p>
                   <span className="flex gap-2">
                     <Button size="sm" variant="primary" disabled={pending} onClick={() => run("RespondToCare", { arrangementId: a.id, version: a.version, decision: "confirm" })}>Yes, I&apos;ll do it</Button>
                     <Button size="sm" disabled={pending} onClick={() => run("RespondToCare", { arrangementId: a.id, version: a.version, decision: "decline" })}>I can&apos;t</Button>
                   </span>
+                </Card>
+              </li>
+            ))}
+            {week.handoversAwaitingMe.map(({ leg, arrangement: a }) => (
+              <li key={`${a.id}:${leg}`}>
+                <Card tone="care" className="flex flex-wrap items-center justify-between gap-3">
+                  <p>
+                    {leg === "drop_off" ? "Take" : "Collect"} {a.childIds.map(app.childName).join(", ")} {leg === "drop_off" ? "to" : "from"} {a.providerName} · {fmtDate(localParts(leg === "drop_off" ? a.start : a.end, app.timeZone).date)} {fmtTime(leg === "drop_off" ? a.start : a.end, app.timeZone)}
+                  </p>
+                  <span className="flex gap-2">
+                    <Button size="sm" variant="primary" disabled={pending} onClick={() => run("RespondToHandover", { arrangementId: a.id, version: a.version, leg, decision: "agree" })}>Yes, I&apos;ll do it</Button>
+                    <Button size="sm" disabled={pending} onClick={() => run("RespondToHandover", { arrangementId: a.id, version: a.version, leg, decision: "decline" })}>I can&apos;t</Button>
+                  </span>
+                </Card>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {week.carePromisedByMe.length > 0 && (
+        <>
+          <SectionTitle>Care you&apos;ve said you&apos;ll do</SectionTitle>
+          <ul className="flex flex-col gap-2">
+            {week.carePromisedByMe.map((a) => (
+              <li key={a.id}>
+                <Card className="flex flex-wrap items-center justify-between gap-3">
+                  <p>{a.childIds.map(app.childName).join(", ")} · {fmtDate(localParts(a.start, app.timeZone).date)} {fmtRange(a.start, a.end, app.timeZone)}</p>
+                  <Button size="sm" onClick={() => setReviewing(a)}>Still OK?</Button>
                 </Card>
               </li>
             ))}
@@ -83,6 +113,7 @@ export function HolidayBoard({ week, holidays, showingArchived, trips = [] }: { 
                             <li key={a.id} className="flex flex-wrap items-center gap-2">
                               <span>{fmtRange(a.start, a.end, app.timeZone)}: {careLabel(a)}, {stateLabel(a)}</span>
                               <button className="text-xs text-ink-3 underline" onClick={() => run("RemoveCare", { arrangementId: a.id, version: a.version })}>remove</button>
+                              {a.kind === "external" && a.state === "confirmed" && <Handovers a={a} />}
                             </li>
                           ))}
                         </ul>
@@ -129,8 +160,75 @@ export function HolidayBoard({ week, holidays, showingArchived, trips = [] }: { 
       )}
 
       {arranging && <ArrangeDialog initial={arranging} onClose={() => setArranging(null)} />}
+      {reviewing && <ReviewCareDialog a={reviewing} onClose={() => setReviewing(null)} />}
       {editing && <HolidayDialog holiday={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
     </div>
+  );
+}
+
+/** Who takes the children and who collects them, for care outside the household. */
+function Handovers({ a }: { a: ArrangementView }) {
+  const app = useApp();
+  const { run, pending } = useCommand(app.householdId);
+  const leg = (key: "drop_off" | "collect", label: string, at: number, v: { by: string | null; agreed: boolean }) => (
+    <label className="flex items-center gap-1">
+      <span>{label} {fmtTime(at, app.timeZone)}:</span>
+      <select
+        className="min-h-9 rounded-md border border-line bg-surface px-2 text-xs"
+        value={v.by ?? ""}
+        disabled={pending}
+        onChange={(e) => run("SetHandover", { arrangementId: a.id, version: a.version, leg: key, accountId: e.target.value || null })}
+      >
+        <option value="">Nobody yet</option>
+        {app.adults.map((p) => <option key={p.id} value={p.id}>{p.id === app.me.id ? "Me" : v.by === p.id ? p.displayName : `${p.displayName} (I'll ask)`}</option>)}
+      </select>
+      {v.by && !v.agreed && <span className="text-xs text-warn">waiting for {v.by === app.me.id ? "you" : app.nameOf(v.by)}</span>}
+      {!v.by && <span className="text-xs text-warn">needs someone</span>}
+    </label>
+  );
+  return (
+    <div className="flex w-full flex-wrap gap-x-4 gap-y-1 pl-2 text-xs">
+      {leg("drop_off", "Drop-off", a.start, a.dropOff)}
+      {leg("collect", "Collection", a.end, a.collect)}
+    </div>
+  );
+}
+
+/**
+ * Looking again at care you promised (R08). Private: nothing here is shared
+ * unless you change something, and no reason is asked for or passed on.
+ */
+function ReviewCareDialog({ a, onClose }: { a: ArrangementView; onClose: () => void }) {
+  const app = useApp();
+  const { run, pending, error } = useCommand(app.householdId);
+  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
+  const partner = app.partner;
+  const choose = async (choice: "keep" | "hand_over" | "withdraw") => {
+    if (await run("ReviewCare", { arrangementId: a.id, version: a.version, choice })) onClose();
+  };
+  return (
+    <Dialog open onClose={onClose} title="Can you still do this?">
+      <div className="flex flex-col gap-3">
+        <p>
+          Looking after {a.childIds.map(app.childName).join(", ")}, {fmtDate(localParts(a.start, app.timeZone).date)} {fmtRange(a.start, a.end, app.timeZone)}.
+        </p>
+        <p className="text-sm text-ink-2">Only you see this. You don&apos;t need to give a reason, and none is passed on.</p>
+        <Button variant="primary" disabled={pending} onClick={() => choose("keep")}>Yes, I&apos;ll still do it</Button>
+        {partner && (
+          <Button disabled={pending} onClick={() => choose("hand_over")}>Ask {partner.displayName} to take over</Button>
+        )}
+        {partner && <p className="-mt-2 text-xs text-ink-3">It stays yours until {partner.displayName} says yes.</p>}
+        {!confirmWithdraw ? (
+          <Button variant="ghost" disabled={pending} onClick={() => setConfirmWithdraw(true)}>I can&apos;t do it any more</Button>
+        ) : (
+          <div className="rounded-xl bg-surface-2 p-3 text-sm">
+            <p>The children will need care again for this time{partner ? `, and ${partner.displayName} will be told that, without a reason` : ""}.</p>
+            <Button className="mt-2" size="sm" disabled={pending} onClick={() => choose("withdraw")}>Yes, I can&apos;t do it</Button>
+          </div>
+        )}
+        <ErrorNote message={error?.message} />
+      </div>
+    </Dialog>
   );
 }
 

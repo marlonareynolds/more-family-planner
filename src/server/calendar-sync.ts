@@ -227,8 +227,9 @@ export async function writeBusy(db: Db, feed: typeof calendarFeeds.$inferSelect,
   const wanted = new Map<string, { start: number; end: number }>();
   for (const b of await loadBusy(db, feed.householdId, window)) {
     if (b.personId !== feed.accountId || b.end <= window.start || b.start >= window.end) continue;
-    if (b.sourceType !== "date" && b.sourceType !== "care" && b.sourceType !== "trip") continue;
-    wanted.set(`${b.sourceType}:${b.sourceId}`, { start: b.start, end: b.end });
+    if (b.sourceType !== "date" && b.sourceType !== "care" && b.sourceType !== "handover" && b.sourceType !== "trip") continue;
+    // One arrangement can give the same person both a drop-off and a collection.
+    wanted.set(b.sourceType === "handover" ? `handover:${b.sourceId}:${b.title === "Drop-off" ? "drop_off" : "collect"}` : `${b.sourceType}:${b.sourceId}`, { start: b.start, end: b.end });
   }
   const pushed = await db.select().from(calendarPushes).where(eq(calendarPushes.feedId, feed.id));
   let written = 0;

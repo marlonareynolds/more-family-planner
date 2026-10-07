@@ -145,6 +145,26 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   await go(sam, "/jobs");
   await expect(sam.getByText("Yours").first()).toBeVisible();
 
+  // Alex promised to look after Robin, then privately asks Sam to take over (R08)
+  const careDay = inDays(1);
+  await go(alex, `/holidays?date=${careDay}`);
+  await alex.getByRole("button", { name: "Arrange care" }).click();
+  await alex.getByLabel("Date").fill(careDay);
+  await alex.getByLabel("Starts").fill("18:00");
+  await alex.getByLabel("Ends").fill("21:00");
+  await alex.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
+  await alex.getByRole("button", { name: "Still OK?" }).click();
+  await expect(alex.getByText("Only you see this.")).toBeVisible();
+  await axe(alex);
+  await alex.getByRole("button", { name: `Ask Sam ${tag} to take over` }).click();
+  await go(sam, `/holidays?date=${careDay}`);
+  await expect(sam.getByText(/Take over looking after Robin/)).toBeVisible();
+  await expect(sam.getByRole("button", { name: "Still OK?" })).toHaveCount(0);
+  await sam.getByRole("button", { name: "Yes, I'll do it" }).click();
+  await expect(sam.getByRole("button", { name: "Still OK?" })).toBeVisible();
+  await go(alex, `/holidays?date=${careDay}`);
+  await expect(alex.getByRole("button", { name: "Still OK?" })).toHaveCount(0);
+
   // One of our places shows first in ideas
   await go(alex, "/places");
   await axe(alex);

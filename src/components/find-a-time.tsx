@@ -43,7 +43,10 @@ export function FindATime({ kind }: { kind: MomentKind }) {
   }, [kind, minutes]);
 
   const careText = (s: SuggestedTime) =>
-    s.care === "partner_free" ? `${app.partner?.displayName ?? "Your partner"} is free for the children`
+    s.care === "arranged" ? "Care for the children is already arranged"
+    : s.care === "pending" ? "Care is asked for, waiting for a yes"
+    : s.care === "partly_arranged" ? "Care is arranged for part of it"
+    : s.care === "partner_free" ? `${app.partner?.displayName ?? "Your partner"} could have the children`
     : s.care === "needs_care" ? "The children will need looking after"
     : s.care === "with_family" ? "Everyone's free"
     : kind === "us" ? "You're both free" : "You're free";
@@ -70,7 +73,7 @@ export function FindATime({ kind }: { kind: MomentKind }) {
               <li key={s.start}>
                 <button onClick={() => setPicked(s)} className={cx("w-full rounded-xl border border-line px-3 py-2 text-left hover:bg-surface-2")}>
                   <span className="block font-medium">{fmtDate(s.date)} · {s.startTime}–{s.endTime}</span>
-                  <span className={cx("block text-sm", s.care === "needs_care" ? "text-warn" : "text-ink-3")}>{careText(s)}</span>
+                  <span className={cx("block text-sm", s.care === "needs_care" || s.care === "partly_arranged" ? "text-warn" : "text-ink-3")}>{careText(s)}</span>
                 </button>
               </li>
             ))}

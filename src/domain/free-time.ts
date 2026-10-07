@@ -30,8 +30,17 @@ export interface FreeTimeInput {
   startBetween?: readonly [string, string];
   /** Days most people are off work (bank holidays): treated like a weekend for long outings. */
   dayOff?: (date: string) => boolean;
+  /** Care the household has already arranged for the children over a time, if any. */
+  arrangedCare?: (start: number, end: number) => ArrangedCare | null;
   limit?: number;
 }
+
+/**
+ * What is already in place for the children over a time: every child
+ * covered by confirmed care, covered once pending asks say yes, or only
+ * partly covered.
+ */
+export type ArrangedCare = "covered" | "pending" | "partly";
 
 export interface SuggestedTime {
   start: number;
@@ -39,8 +48,12 @@ export interface SuggestedTime {
   date: string;
   startTime: string;
   endTime: string;
-  /** Whether the children are looked after, need arranging, or come along. */
-  care: "with_family" | "partner_free" | "needs_care" | "no_children";
+  /**
+   * Whether the children come along, are already looked after (confirmed,
+   * or asked and waiting), need arranging, or whether a free partner could
+   * look after them (a possibility, not their agreement).
+   */
+  care: "with_family" | "arranged" | "pending" | "partly_arranged" | "partner_free" | "needs_care" | "no_children";
   score: number;
 }
 
@@ -129,13 +142,10 @@ export function suggestTimes(input: FreeTimeInput): SuggestedTime[] {
   for (const c of candidates) {
     if (!input.hasChildren) c.care = "no_children";
     else if (kind === "family") c.care = "with_family";
-    else {
-      const carerFree = input.carerIds.some((id) => commonFreeWindows([id], { start: c.start, end: c.end }, input.busy, input.durationMinutes).length > 0);
-      c.care = carerFree ? "partner_free" : "needs_care";
-    }
+    else c.care = careFor(input, c.start, c.end);
   }
   // Easiest to make happen first: best fit, then no extra childcare, then soonest.
-  const careRank = { no_children: 0, with_family: 0, partner_free: 0, needs_care: 1 };
+  const careRank = { no_children: 0, with_family: 0, arranged: 0, pending: 0, partner_free: 0, partly_arranged: 1, needs_care: 1 };
   // Variety: at most two options share a start time, so an empty fortnight
   // offers a weekend daytime or a lunch, not six identical evenings.
   const seen = new Map<string, number>();
@@ -148,4 +158,55 @@ export function suggestTimes(input: FreeTimeInput): SuggestedTime[] {
     if (picked.length >= (input.limit ?? 6)) break;
   }
   return picked.sort((a, b) => a.start - b.start);
+}
+
+/** Care for the children while the participants are busy with this time. */
+function careFor(input: FreeTimeInput, start: number, end: number): SuggestedTime["care"] {
+  const arranged = input.arrangedCare?.(start, end) ?? null;
+  if (arranged === "covered") return "arranged";
+  if (arranged === "pending") return "pending";
+  const carerFree = input.carerIds.some((id) => commonFreeWindows([id], { start, end }, input.busy, (end - start) / 60_000).length > 0);
+  if (carerFree) return "partner_free";
+  return arranged === "partly" ? "partly_arranged" : "needs_care";
+}
+
+/**
+ * Every day's first evening start, between `from` and `to` local time, when
+ * all the participants are free for `minutes`. Unlike `suggestTimes` this is
+ * a calendar fact, not a ranked shortlist: nothing is dropped for variety
+ * (review R05). Care is filled in the same way as for suggestions.
+ */
+export function freeEvenings(
+  input: Pick<FreeTimeInput, "now" | "timeZone" | "days" | "participantIds" | "carerIds" | "hasChildren" | "busy" | "arrangedCare"> & {
+    minutes: number;
+    from: string;
+    to: string;
+  },
+): SuggestedTime[] {
+  const tz = input.timeZone;
+  const step = 30 * 60_000;
+  const duration = input.minutes * 60_000;
+  const earliest = Math.ceil((input.now + 15 * 60_000) / step) * step;
+  const today = instantToLocalDate(input.now, tz);
+  const out: SuggestedTime[] = [];
+  for (let d = 0; d < input.days; d++) {
+    const date = addDays(today, d);
+    const first = Math.max(earliest, localToInstantCompatible(`${date}T${input.from}`, tz));
+    const last = localToInstantCompatible(`${date}T${input.to}`, tz);
+    if (first > last) continue;
+    const windows = commonFreeWindows(input.participantIds, { start: first, end: last + duration }, input.busy, input.minutes);
+    let start: number | null = null;
+    for (const w of windows) {
+      const s = Math.ceil(w.start / step) * step;
+      if (s <= last && s + duration <= w.end) {
+        start = s;
+        break;
+      }
+    }
+    if (start === null) continue;
+    const slot: SuggestedTime = { start, end: start + duration, date, startTime: clock(start, tz), endTime: clock(start + duration, tz), care: "no_children", score: 0 };
+    if (input.hasChildren) slot.care = careFor({ ...input, kind: "us", durationMinutes: input.minutes, childBusy: [] }, slot.start, slot.end);
+    out.push(slot);
+  }
+  return out;
 }

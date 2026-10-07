@@ -82,7 +82,7 @@ export async function assertPeople(
 export async function reserve(
   tx: Tx,
   householdId: string,
-  sourceType: "moment" | "care",
+  sourceType: "moment" | "care" | "drop_off" | "collect",
   sourceId: string,
   accountIds: readonly string[],
   start: number,
@@ -101,7 +101,7 @@ export async function reserve(
   );
 }
 
-export async function release(tx: Tx, sourceType: "moment" | "care", sourceId: string, accountIds?: readonly string[]): Promise<void> {
+export async function release(tx: Tx, sourceType: "moment" | "care" | "drop_off" | "collect", sourceId: string, accountIds?: readonly string[]): Promise<void> {
   const where = accountIds?.length
     ? and(eq(reservations.sourceType, sourceType), eq(reservations.sourceId, sourceId), inArray(reservations.accountId, [...accountIds]))
     : and(eq(reservations.sourceType, sourceType), eq(reservations.sourceId, sourceId));

@@ -249,6 +249,18 @@ async function detachAdult(ctx: CommandContext, accountId: string, reason: strin
     await release(tx, "care", c.id);
     await tx.update(careArrangements).set({ state: "declined", note: reason, version: sql`${careArrangements.version} + 1` }).where(eq(careArrangements.id, c.id));
   }
+  // Drop-offs and collections they were down for are open again.
+  for (const leg of ["drop_off", "collect"] as const) {
+    const col = leg === "drop_off" ? careArrangements.dropOffBy : careArrangements.collectBy;
+    const named = await tx.select({ id: careArrangements.id }).from(careArrangements).where(and(eq(careArrangements.householdId, household.id), eq(col, accountId), gt(careArrangements.endAt, now)));
+    for (const c of named) {
+      await release(tx, leg, c.id, [accountId]);
+      await tx
+        .update(careArrangements)
+        .set({ ...(leg === "drop_off" ? { dropOffBy: null, dropOffAgreed: false } : { collectBy: null, collectAgreed: false }), version: sql`${careArrangements.version} + 1` })
+        .where(eq(careArrangements.id, c.id));
+    }
+  }
   await tx
     .update(invitations)
     .set({ revokedAt: now })

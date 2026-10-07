@@ -36,6 +36,7 @@ import { addDays, instantToLocalDate, isWeekKey, startOfLocalDate, weekKeyFor } 
 import type { Actor } from "../auth";
 import type { PlaceView } from "@/lib/places";
 import { placesFor } from "./places";
+import { usShelf, usShelfKeys } from "./shelf";
 import { loadBusy, loadEventOccurrences, loadTrips } from "./busy";
 import { tripCareNeeds } from "@/domain/trips";
 import { STALE_AFTER_MS } from "../calendar-sync";
@@ -177,6 +178,11 @@ export interface CareDay {
   }[];
 }
 
+export interface HandoverAsk {
+  leg: "drop_off" | "collect";
+  arrangement: ArrangementView;
+}
+
 export interface ArrangementView {
   id: string;
   kind: "parent" | "external" | "not_needed";
@@ -189,6 +195,14 @@ export interface ArrangementView {
   version: number;
   note: string;
   awaitingMe: boolean;
+  /** Asked of the other parent to take over this care (R08). */
+  replacesId: string | null;
+  /** Mine to keep, hand over or withdraw: confirmed parent care I promised, still ahead. */
+  canReview: boolean;
+  /** Named handovers for care outside the household. */
+  dropOff: { by: string | null; agreed: boolean };
+  collect: { by: string | null; agreed: boolean };
+  handoverMinutes: number;
 }
 
 export interface ExpenseView extends ExpenseSummary {
@@ -228,6 +242,10 @@ export interface WeekView {
   moments: MomentView[];
   care: CareDay[];
   careAwaitingMe: ArrangementView[];
+  /** Drop-offs and collections someone asked me to do. */
+  handoversAwaitingMe: HandoverAsk[];
+  /** Care I've said I'll do that is still ahead: mine to keep, hand over or withdraw (R08). Only I see this list. */
+  carePromisedByMe: ArrangementView[];
   expenses: ExpenseView[];
   money: { estimateMinor: number; committedMinor: number; netPaidMinor: number };
   attention: AttentionItem[];
@@ -243,6 +261,8 @@ export interface WeekView {
   planning: { weekKey: string; planned: boolean };
   /** The household's own local places, offered ahead of general ideas. */
   places: PlaceView[];
+  /** Keys of the For Us ideas on the viewer's own shelf; null while they're the only adult. */
+  usShelf: string[] | null;
   /** Time away overlapping this view, and the next family trip ahead. */
   trips: TripView[];
   nextFamilyTrip: TripView | null;
@@ -434,6 +454,11 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     version: a.version,
     note: a.note,
     awaitingMe: a.state === "proposed" && a.kind === "parent" && a.responsibleAccountId === viewer,
+    replacesId: a.replacesId,
+    canReview: a.state === "confirmed" && a.kind === "parent" && a.responsibleAccountId === viewer && a.endAt.getTime() > now.getTime(),
+    dropOff: { by: a.dropOffBy, agreed: a.dropOffAgreed },
+    collect: { by: a.collectBy, agreed: a.collectAgreed },
+    handoverMinutes: a.handoverMinutes,
   });
   const parentBusy = new Map<string, Interval[]>();
   for (const b of busy) {
@@ -587,6 +612,13 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     careDays.push({ date, groups });
   }
   const careAwaitingMe = arrRows.map(arrangementView).filter((a) => a.awaitingMe);
+  const carePromisedByMe = arrRows.map(arrangementView).filter((a) => a.canReview);
+  const handoversAwaitingMe: HandoverAsk[] = arrRows
+    .filter((a) => a.state !== "declined" && a.endAt.getTime() > now.getTime())
+    .flatMap((a) => [
+      ...(a.dropOffBy === viewer && !a.dropOffAgreed ? [{ leg: "drop_off" as const, arrangement: arrangementView(a) }] : []),
+      ...(a.collectBy === viewer && !a.collectAgreed ? [{ leg: "collect" as const, arrangement: arrangementView(a) }] : []),
+    ]);
 
   // ── Money: one row per real cost, on the activity-week basis ──
   const expenseRows = await db
@@ -664,6 +696,7 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
   const planning = { weekKey: planningKey, planned: !!plan };
 
   const placesOut = await placesFor(db, household.id);
+  const usShelfOut = usShelfKeys(await usShelf(db, household.id, viewer, adultIds), placesOut);
   const hours = await forecastFor(db, household.id, now);
   const weather: Record<string, DayWeather> = {};
   const wetPlans: WetPlan[] = [];
@@ -688,7 +721,7 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     : [];
   const turnToChoose = await whoseTurn(db, household.id, kids.map((k) => k.id));
 
-  const attention = buildAttention({ viewer, momentsOut, careDays, careAwaitingMe, kids, adults, now, tz, checkinDone: !!checkin, openInvite: !!invite, calendars, datesAhead, rituals: ritualsOut, planning, wetPlans, wishes: wishRows });
+  const attention = buildAttention({ viewer, momentsOut, careDays, careAwaitingMe, handoversAwaitingMe, kids, adults, now, tz, checkinDone: !!checkin, openInvite: !!invite, calendars, datesAhead, rituals: ritualsOut, planning, wetPlans, wishes: wishRows });
 
   return {
     me: { id: viewer, displayName: adults.find((a) => a.id === viewer)?.displayName ?? actor.displayName },
@@ -709,6 +742,8 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     moments: momentsOut,
     care: careDays,
     careAwaitingMe,
+    handoversAwaitingMe,
+    carePromisedByMe,
     expenses: expensesOut,
     money,
     attention,
@@ -726,6 +761,7 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     helpers: helperRows.map((h) => ({ id: h.id, name: h.name, relation: h.relation, phone: h.phone, version: h.version })),
     planning,
     places: placesOut,
+    usShelf: usShelfOut,
     trips: tripsOut,
     place: household.placeName ? { name: household.placeName } : null,
     weather,
@@ -777,6 +813,7 @@ function buildAttention(input: {
   momentsOut: MomentView[];
   careDays: CareDay[];
   careAwaitingMe: ArrangementView[];
+  handoversAwaitingMe?: HandoverAsk[];
   kids: { id: string; preferredName: string }[];
   adults: Person[];
   now: Date;
@@ -847,6 +884,9 @@ function buildAttention(input: {
   }
   for (const a of input.careAwaitingMe) {
     out.push({ key: `care:${a.id}`, priority: 1, text: `Can you look after ${names(a.childIds)}?`, action: "care", targetId: a.id });
+  }
+  for (const h of input.handoversAwaitingMe ?? []) {
+    out.push({ key: `handover:${h.arrangement.id}:${h.leg}`, priority: 1, text: `Can you do the ${h.leg === "drop_off" ? "drop-off" : "collection"} for ${names(h.arrangement.childIds)}?`, action: "care", targetId: h.arrangement.id });
   }
   for (const day of input.careDays) {
     for (const g of day.groups) {
