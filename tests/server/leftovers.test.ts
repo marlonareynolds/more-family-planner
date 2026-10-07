@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-import { notifications } from "@/db/schema";
+import { careArrangements, notifications } from "@/db/schema";
 import { nextUp } from "@/domain/next-up";
 import { queueLeaveReminders } from "@/server/leave-by";
 import { processOutbox } from "@/server/outbox";
@@ -78,5 +78,49 @@ describe("leave-by reminders", () => {
     // An agreed plan that comes sooner wins.
     const soon = { id: "m1", title: "Lunch", start: now + 3_600_000, end: now + 7_200_000, travelBeforeMinutes: 0 };
     expect(nextUp({ me: w.alex.accountId, now, moments: [soon], events: week.events })).toMatchObject({ kind: "moment", title: "Lunch", leaveBy: null });
+  });
+});
+
+describe("leave-by reminders for drop-offs and collections", () => {
+  async function club() {
+    const w = await newWorld();
+    const { childId } = await w.run(w.alex, "AddChild", { preferredName: "Ada", ageBand: "5-7" });
+    const { arrangementId } = await w.run(w.alex, "ArrangeCare", { kind: "external", providerName: "Holiday club", childIds: [childId], span: timed("2030-10-09", "09:00", "15:30"), confirmed: true });
+    const version = async () => (await w.db.select().from(careArrangements).where(eq(careArrangements.id, arrangementId)))[0].version;
+    return { w, arrangementId, version };
+  }
+
+  it("tells the adult who agreed to collect when to set off, and nobody else", async () => {
+    const { w, arrangementId, version } = await club();
+    await w.run(w.sam, "SetHandover", { arrangementId, version: await version(), leg: "collect", accountId: w.sam.accountId });
+    // Collection at 15:30 BST with 20 minutes' travel: leave by 15:10, told about 14:50.
+    expect(await queueLeaveReminders(w.db, new Date("2030-10-09T12:00:00Z"))).toEqual({ queued: 1 });
+    expect(await queueLeaveReminders(w.db, new Date("2030-10-09T12:30:00Z"))).toEqual({ queued: 0 });
+    await processOutbox(w.db, new Date("2030-10-09T13:00:00Z"));
+    expect(await told(w, w.sam.accountId)).toEqual([]);
+    await processOutbox(w.db, new Date("2030-10-09T13:51:00Z"));
+    expect((await told(w, w.sam.accountId)).filter((t) => t.startsWith("Leave by"))).toEqual(["Leave by 15:10 to collect Ada from Holiday club."]);
+    expect((await told(w, w.alex.accountId)).filter((t) => t.startsWith("Leave by"))).toEqual([]);
+  });
+
+  it("an asked-but-not-agreed handover sends nothing, and one handed back is dropped", async () => {
+    const { w, arrangementId, version } = await club();
+    await w.run(w.alex, "SetHandover", { arrangementId, version: await version(), leg: "collect", accountId: w.sam.accountId });
+    expect(await queueLeaveReminders(w.db, new Date("2030-10-09T12:00:00Z"))).toEqual({ queued: 0 });
+
+    await w.run(w.sam, "RespondToHandover", { arrangementId, version: await version(), leg: "collect", decision: "agree" });
+    expect(await queueLeaveReminders(w.db, new Date("2030-10-09T12:00:00Z"))).toEqual({ queued: 1 });
+    // Sam steps back before the reminder is due.
+    await w.run(w.sam, "SetHandover", { arrangementId, version: await version(), leg: "collect", accountId: null });
+    await processOutbox(w.db, new Date("2030-10-09T13:51:00Z"));
+    expect((await told(w, w.sam.accountId)).filter((t) => t.startsWith("Leave by"))).toEqual([]);
+  });
+
+  it("the drop-off reminder names where the children are going", async () => {
+    const { w, arrangementId, version } = await club();
+    await w.run(w.alex, "SetHandover", { arrangementId, version: await version(), leg: "drop_off", accountId: w.alex.accountId });
+    expect(await queueLeaveReminders(w.db, new Date("2030-10-09T05:00:00Z"))).toEqual({ queued: 1 });
+    await processOutbox(w.db, new Date("2030-10-09T07:21:00Z"));
+    expect((await told(w, w.alex.accountId)).filter((t) => t.startsWith("Leave by"))).toEqual(["Leave by 08:40 to take Ada to Holiday club."]);
   });
 });

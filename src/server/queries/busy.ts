@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
 import type { DbOrTx } from "@/db/client";
 import { careArrangements, eventExceptions, events, moments, reservations, trips } from "@/db/schema";
 import type { Busy } from "@/domain/availability";
@@ -13,6 +13,9 @@ export interface EventOccurrence {
   end: number;
   row: typeof events.$inferSelect;
 }
+
+/** How many exception rows the last load read, for the BR-18 bound. */
+export const loaderStats = { lastExceptionsRead: 0 };
 
 /**
  * Event occurrences overlapping a horizon. Reads are bounded by the
@@ -36,7 +39,26 @@ export async function loadEventOccurrences(db: DbOrTx, householdId: string, hori
       ),
     );
   const seriesIds = rows.filter((r) => r.rule).map((r) => r.id);
-  const exRows = seriesIds.length ? await db.select().from(eventExceptions).where(inArray(eventExceptions.eventId, seriesIds)) : [];
+  // Only the exceptions that can matter here (BR-18): those whose original
+  // slot is near the horizon (local ids, with room for 14-day events and any
+  // time zone), and those moved into it. A long series' history stays unread.
+  const idFrom = new Date(horizon.start - 16 * 86_400_000).toISOString().slice(0, 16);
+  const idTo = new Date(horizon.end + 2 * 86_400_000).toISOString().slice(0, 16);
+  const exRows = seriesIds.length
+    ? await db
+        .select()
+        .from(eventExceptions)
+        .where(
+          and(
+            inArray(eventExceptions.eventId, seriesIds),
+            or(
+              and(gte(eventExceptions.recurrenceId, idFrom), lt(eventExceptions.recurrenceId, idTo)),
+              and(eq(eventExceptions.kind, "moved"), lt(eventExceptions.startAt, to), gt(eventExceptions.endAt, from)),
+            ),
+          ),
+        )
+    : [];
+  loaderStats.lastExceptionsRead = exRows.length;
   const exBy = new Map<string, SeriesException[]>();
   for (const e of exRows) {
     const list = exBy.get(e.eventId) ?? [];

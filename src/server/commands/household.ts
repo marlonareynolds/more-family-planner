@@ -149,15 +149,19 @@ export const joinHousehold = defineCommand({
   payload: z.object({ token: z.string().min(10).max(200) }),
   async handler(ctx, p) {
     const invalid = () => new DomainError("INVITE_INVALID", "This invitation link is no longer valid. Ask for a new one.");
-    // Lock the invitation so a concurrent revoke and join cannot both win (AT-01).
-    const [inv] = await ctx.tx.select().from(invitations).where(eq(invitations.tokenHash, hashInviteToken(p.token))).for("update");
-    if (!inv || inv.revokedAt || inv.acceptedAt || inv.expiresAt.getTime() <= ctx.now.getTime()) throw invalid();
+    // Lock the household, then the invitation: the same order as household
+    // commands such as RevokeInvite, so a revoke and a join at the same moment
+    // queue behind each other instead of deadlocking (BR-17). Only one can win (AT-01).
+    const [found] = await ctx.tx.select({ householdId: invitations.householdId }).from(invitations).where(eq(invitations.tokenHash, hashInviteToken(p.token)));
+    if (!found) throw invalid();
     const [h] = await ctx.tx
       .select()
       .from(households)
-      .where(and(eq(households.id, inv.householdId), isNull(households.deletedAt)))
+      .where(and(eq(households.id, found.householdId), isNull(households.deletedAt)))
       .for("update");
     if (!h) throw invalid();
+    const [inv] = await ctx.tx.select().from(invitations).where(eq(invitations.tokenHash, hashInviteToken(p.token))).for("update");
+    if (!inv || inv.revokedAt || inv.acceptedAt || inv.expiresAt.getTime() <= ctx.now.getTime()) throw invalid();
     if (await activeMembership(ctx.tx, ctx.actor.accountId)) {
       throw new DomainError("CONFLICT", "You are already in a household. Leave it before joining another.");
     }

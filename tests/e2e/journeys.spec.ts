@@ -106,6 +106,8 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   await alex.getByRole("button", { name: "Save as draft" }).click();
   await expect(alex.getByText("Dinner at the Italian")).toBeVisible();
   await alex.getByRole("button", { name: "Invite" }).click();
+  // The invitation has landed once the draft's Invite button is gone.
+  await expect(alex.getByRole("button", { name: "Invite" })).toHaveCount(0);
 
   // Sam sees it waiting and agrees
   await go(sam, "/us");
@@ -215,4 +217,17 @@ test("an adult answers the weekly trial questions", async ({ browser }, info) =>
   await go(alex, "/trial");
   await expect(alex.getByText("You: 1 week")).toBeVisible();
   await expect(alex.getByText(/Moments: – \/ 2 \/ –/)).toBeVisible();
+});
+
+test("an adult leaves the household from Settings", async ({ browser }, info) => {
+  const tag = `${info.project.name}-l${Date.now().toString(36)}`;
+  const vp = info.project.name === "phone" ? { width: 412, height: 915 } : undefined;
+  const alex = await adult(browser, `Alex ${tag}`, vp);
+  await alex.getByLabel("Household name").fill(`Household ${tag}`);
+  await alex.getByRole("button", { name: "Start our household" }).click();
+  await alex.waitForURL(/\/welcome/);
+  await go(alex, "/settings");
+  await alex.getByRole("button", { name: "Leave household" }).click();
+  await alex.getByRole("dialog").getByRole("button", { name: "Leave", exact: true }).click();
+  await alex.waitForURL(/\/setup/);
 });

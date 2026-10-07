@@ -1,6 +1,6 @@
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, ne, or } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { accounts, children, events, households, memberships, outbox } from "@/db/schema";
+import { accounts, careArrangements, children, events, households, memberships, outbox } from "@/db/schema";
 import { isDuty } from "@/domain/next-up";
 import { inQuietHours, localClock } from "@/domain/reach";
 import { loadEventOccurrences } from "./queries/busy";
@@ -63,7 +63,75 @@ export async function queueLeaveReminders(db: Db, now = new Date()): Promise<{ q
       }
     }
   }
+  queued += (await queueHandoverReminders(db, now)).queued;
   return { queued };
+}
+
+/** When the named adult needs to set off for a drop-off or a collection they agreed to. */
+function handoverLeave(a: { startAt: Date; endAt: Date; handoverMinutes: number }, leg: "drop_off" | "collect"): number {
+  return (leg === "drop_off" ? a.startAt : a.endAt).getTime() - a.handoverMinutes * 60_000;
+}
+
+/**
+ * "Leave by 15:10 to collect Ada from Holiday club." The same reminder as a
+ * child's event, for the drop-offs and collections an adult agreed to do.
+ * Re-checked at delivery, so a changed or handed-back one never fires.
+ */
+export async function queueHandoverReminders(db: Db, now = new Date()): Promise<{ queued: number }> {
+  const nowMs = now.getTime();
+  const until = new Date(nowMs + LOOKAHEAD_MS + LEAVE_NOTICE_MS + 2 * 3_600_000);
+  const rows = await db
+    .select({ a: careArrangements, timeZone: households.timeZone })
+    .from(careArrangements)
+    .innerJoin(households, eq(households.id, careArrangements.householdId))
+    .where(
+      and(
+        isNull(households.deletedAt),
+        ne(careArrangements.state, "declined"),
+        gt(careArrangements.handoverMinutes, 0),
+        gt(careArrangements.endAt, now),
+        lt(careArrangements.startAt, until),
+        or(eq(careArrangements.dropOffAgreed, true), eq(careArrangements.collectAgreed, true)),
+      ),
+    );
+  let queued = 0;
+  for (const { a } of rows) {
+    const kids = await db.select({ id: children.id, name: children.preferredName }).from(children).where(eq(children.householdId, a.householdId));
+    const who = a.childIds.map((id) => kids.find((k) => k.id === id)?.name).filter(Boolean).join(" and ") || "the children";
+    for (const leg of ["drop_off", "collect"] as const) {
+      const by = leg === "drop_off" ? (a.dropOffAgreed ? a.dropOffBy : null) : a.collectAgreed ? a.collectBy : null;
+      if (!by) continue;
+      const leave = handoverLeave(a, leg);
+      if (!(leave - LEAVE_NOTICE_MS < nowMs + LOOKAHEAD_MS && leave > nowMs)) continue;
+      const [adult] = await db.select({ timeZone: accounts.timeZone, quietStart: accounts.quietStart, quietEnd: accounts.quietEnd }).from(accounts).where(eq(accounts.id, by));
+      if (!adult) continue;
+      const remindAt = Math.max(nowMs, leave - LEAVE_NOTICE_MS);
+      if (inQuietHours(localClock(remindAt, adult.timeZone), adult.quietStart, adult.quietEnd)) continue;
+      const where = a.providerName ?? "the carer";
+      const text = leg === "drop_off" ? `Leave by ${localClock(leave, adult.timeZone)} to take ${who} to ${where}.` : `Leave by ${localClock(leave, adult.timeZone)} to collect ${who} from ${where}.`;
+      const r = await db
+        .insert(outbox)
+        .values({
+          householdId: a.householdId,
+          eventType: "notify",
+          dedupeKey: `notify:care.leave:${a.id}:${a.version}:${leg}:${by}`,
+          payload: { recipientId: by, kind: "care.leave", text, sourceType: "care", sourceId: a.id, sourceVersion: a.version, householdId: a.householdId, leg, expiresAt: leave },
+          availableAt: new Date(remindAt),
+        })
+        .onConflictDoNothing({ target: outbox.dedupeKey })
+        .returning({ id: outbox.id });
+      queued += r.length;
+    }
+  }
+  return { queued };
+}
+
+/** At delivery: the same arrangement, still on, and they're still down for that handover. */
+export async function handoverLeaveStillRelevant(db: Db, p: { sourceId: string; sourceVersion: number; recipientId: string; leg?: string }, now: Date): Promise<boolean> {
+  const [a] = await db.select().from(careArrangements).where(eq(careArrangements.id, p.sourceId));
+  if (!a || a.version !== p.sourceVersion || a.state === "declined" || (p.leg !== "drop_off" && p.leg !== "collect")) return false;
+  const mine = p.leg === "drop_off" ? a.dropOffBy === p.recipientId && a.dropOffAgreed : a.collectBy === p.recipientId && a.collectAgreed;
+  return mine && handoverLeave(a, p.leg) > now.getTime() - 15 * 60_000;
 }
 
 /** At delivery: the occurrence still happens at that time, with the same travel, and they're still down for it. */

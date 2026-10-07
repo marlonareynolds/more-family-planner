@@ -3,7 +3,7 @@ import type { Db } from "@/db/client";
 import { acceptances, careArrangements, memberships, moments, notifications, outbox, preparationTasks } from "@/db/schema";
 import { isAgreed } from "@/domain/moments";
 import { jobStillRelevant } from "./jobs";
-import { leaveStillRelevant } from "./leave-by";
+import { handoverLeaveStillRelevant, leaveStillRelevant } from "./leave-by";
 
 /**
  * Drains the transactional outbox (spec 10.1, 13.2). Processing is
@@ -23,6 +23,8 @@ export interface NotifyPayload {
   householdId: string;
   /** For a leave-by reminder: which occurrence of a repeating event. */
   occurrenceStart?: number;
+  /** For a handover leave-by reminder: the drop-off or the collection. */
+  leg?: "drop_off" | "collect";
   /** When this stops being worth pushing (epoch ms); default is the push window. */
   expiresAt?: number;
 }
@@ -59,6 +61,7 @@ export async function stillRelevant(db: Db, p: NotifyPayload, now: Date): Promis
   if (p.sourceType === "care") {
     const [c] = await db.select().from(careArrangements).where(eq(careArrangements.id, p.sourceId));
     if (!c) return false;
+    if (p.kind === "care.leave") return handoverLeaveStillRelevant(db, p, now);
     // A handover ask is worth sending only while it still waits for them.
     if (p.kind === "care.handover_asked") return c.version === p.sourceVersion && ((c.dropOffBy === p.recipientId && !c.dropOffAgreed) || (c.collectBy === p.recipientId && !c.collectAgreed));
     // News about a change (withdrawn, taken over, a handover dropped): still true unless it changed again.
