@@ -1,5 +1,6 @@
 "use client";
 
+import { SearchX } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { CATALOGUE, matchActivities, type Activity, type AgeBand, type Setting } from "@/lib/catalogue";
@@ -107,7 +108,7 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
         <Checkbox checked={stepFree} onChange={setStepFree} label="Step-free" />
       </div>
       {shown.length === 0 ? (
-        <EmptyState title="Nothing in the starter ideas fits all of that.">Try a wider budget or setting, or plan your own.</EmptyState>
+        <EmptyState icon={<SearchX />} title="Nothing fits all of that.">Try a wider budget or setting, or plan your own.</EmptyState>
       ) : (
         <ul className="grid gap-3 sm:grid-cols-2">
           {shown.map((a) => {

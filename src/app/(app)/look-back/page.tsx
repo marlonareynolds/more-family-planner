@@ -1,3 +1,4 @@
+import { BookHeart } from "lucide-react";
 import Link from "next/link";
 import { fmtDate } from "@/components/format";
 import { Card, EmptyState, SectionTitle } from "@/components/ui";
@@ -41,7 +42,7 @@ export default async function LookBackPage({ searchParams }: PageProps<"/look-ba
 
       {total === 0 ? (
         <div className="mt-6">
-          <EmptyState title={month === thisMonth ? "Nothing to look back on yet this month." : "Nothing marked as happened this month."}>
+          <EmptyState icon={<BookHeart />} tone="us" action={month === thisMonth ? <Link href="/week" className="inline-flex min-h-11 items-center rounded-full bg-brand px-5 font-medium text-white">See this week</Link> : undefined} title={month === thisMonth ? "Nothing to look back on yet this month." : "Nothing marked as happened this month."}>
             When a plan happens, tap “It happened” and add a highlight. They collect here.
           </EmptyState>
         </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import { Coffee } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import type { WeekPick, WeekPicks } from "@/server/queries/picks";
@@ -7,7 +8,7 @@ import type { WeekView } from "@/server/queries/week";
 import { useApp } from "./app-context";
 import { AskHelperDialog } from "./ask-helper";
 import { fmtDate, fmtTime, localParts } from "./format";
-import { Badge, Button, Card, Checkbox, ErrorNote, SectionTitle, inputClass } from "./ui";
+import { Badge, Button, Card, Checkbox, ChoiceCard, EmptyState, ErrorNote, SectionTitle, inputClass } from "./ui";
 import { useCommand } from "./use-command";
 import { careLine, costLine, endDateOf } from "./week-picks";
 
@@ -127,7 +128,7 @@ export function PlanWeekFlow({ week, picks }: { week: WeekView; picks: Partial<R
         {week.rituals.filter((r) => r.active).length > 0 && <p className="text-sm text-ink-2">Rituals: {week.rituals.filter((r) => r.active).map((r) => r.title).join(", ")}.</p>}
       </Card>
 
-      {kinds.length === 0 && <p className="mt-6 text-ink-2">The week is full: no free time long enough for anything new. That&apos;s fine. Rest is valid too.</p>}
+      {kinds.length === 0 && <div className="mt-8"><EmptyState icon={<Coffee />} title="This week is full.">No free time long enough for anything new. That&apos;s fine: rest is valid too.</EmptyState></div>}
       {kinds.map((k, n) => {
         const data = picks[k]!;
         return (
@@ -138,21 +139,17 @@ export function PlanWeekFlow({ week, picks }: { week: WeekView; picks: Partial<R
               <legend className="sr-only">{HEADINGS[k].title}</legend>
               {data.picks.map((p, i) =>
                 p.slot ? (
-                  <label key={p.activity.key} className={`flex cursor-pointer gap-3 rounded-2xl border p-3 ${choice[k] === i ? "border-brand bg-brand-soft" : "border-line"}`}>
-                    <input type="radio" name={`pick-${k}`} className="mt-1" checked={choice[k] === i} onChange={() => setChoice({ ...choice, [k]: i })} />
-                    <span className="min-w-0">
-                      <span className="block font-medium">{p.activity.title}{p.activity.local && <span className="ml-2 align-middle"><Badge tone="good">Your place</Badge></span>}</span>
-                      <span className="block text-sm">{fmtDate(p.slot.date)} · {p.slot.startTime}–{p.slot.endTime} · {costLine(p.activity.typicalCostMinor)}</span>
-                      <span className={`block text-sm ${p.carer.kind === "helper" || p.carer.kind === "none" ? "text-warn" : "text-ink-3"}`}>{careLine(p, k, partner?.displayName ?? null)}</span>
-                      {p.activity.weatherSensitive && p.activity.backup && <span className="block text-xs text-ink-3">If it rains: {p.activity.backup}</span>}
-                    </span>
-                  </label>
+                  <ChoiceCard key={p.activity.key} name={`pick-${k}`} checked={choice[k] === i} onChange={() => setChoice({ ...choice, [k]: i })}>
+                    <span className="block font-medium">{p.activity.title}{p.activity.local && <span className="ml-2 align-middle"><Badge tone="good">Your place</Badge></span>}</span>
+                    <span className="mt-0.5 block text-sm text-ink-2">{fmtDate(p.slot.date)} · {p.slot.startTime}–{p.slot.endTime} · {costLine(p.activity.typicalCostMinor)}</span>
+                    <span className={`block text-sm ${p.carer.kind === "helper" || p.carer.kind === "none" ? "text-warn" : "text-ink-3"}`}>{careLine(p, k, partner?.displayName ?? null)}</span>
+                    {p.activity.weatherSensitive && p.activity.backup && <span className="block text-xs text-ink-3">If it rains: {p.activity.backup}</span>}
+                  </ChoiceCard>
                 ) : null,
               )}
-              <label className={`flex cursor-pointer gap-3 rounded-2xl border p-3 ${choice[k] === null ? "border-brand bg-brand-soft" : "border-line"}`}>
-                <input type="radio" name={`pick-${k}`} checked={choice[k] === null} onChange={() => setChoice({ ...choice, [k]: null })} />
-                <span>Not this week</span>
-              </label>
+              <ChoiceCard name={`pick-${k}`} checked={choice[k] === null} onChange={() => setChoice({ ...choice, [k]: null })}>
+                <span className="text-ink-2">Not this week</span>
+              </ChoiceCard>
             </fieldset>
             {k === "me" && chosen("me")?.carer.kind === "partner" && partner && (
               <div className="mt-2"><Checkbox checked={askPartner} onChange={setAskPartner} label={`Ask ${partner.displayName} to have the children then`} /></div>
@@ -170,7 +167,7 @@ export function PlanWeekFlow({ week, picks }: { week: WeekView; picks: Partial<R
         );
       })}
 
-      <div className="sticky bottom-16 mt-8 flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-surface p-3 md:bottom-4">
+      <div className="shadow-lift sticky bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] z-30 mt-8 flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-surface/95 p-3 backdrop-blur md:bottom-4">
         <span className="flex-1 text-sm text-ink-2">{selected.length ? `${selected.length} plan${selected.length === 1 ? "" : "s"}: ${selected.map((s) => s.pick.activity.title).join(", ")}` : "Nothing picked yet."}</span>
         <Button variant="primary" disabled={pending || !selected.length} onClick={send}>{partner ? `Send to ${partner.displayName}` : "Add to the diary"}</Button>
       </div>

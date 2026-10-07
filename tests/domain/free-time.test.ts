@@ -52,4 +52,22 @@ describe("free time suggestions", () => {
     for (const t of new Set(starts)) expect(starts.filter((x) => x === t).length).toBeLessThanOrEqual(4);
     expect(new Set(starts).size).toBeGreaterThan(1);
   });
+
+  it("puts a long day out on a weekend or bank holiday morning, and family time ends by bedtime", () => {
+    // 2030-10-07 is a Monday: a six-hour seaside day waits for Saturday or a bank holiday.
+    const day = { ...base, days: 7, kind: "family" as const, durationMinutes: 360, participantIds: ["a", "s"], carerIds: [], hasChildren: true, busy: [] };
+    const slots = suggestTimes(day);
+    expect(slots.length).toBeGreaterThan(0);
+    expect(slots.every((s) => s.date === "2030-10-12" || s.date === "2030-10-13")).toBe(true);
+    expect(slots.every((s) => s.startTime >= "08:30" && s.startTime <= "11:00")).toBe(true);
+    expect(suggestTimes({ ...day, dayOff: (d) => d === "2030-10-08" }).some((s) => s.date === "2030-10-08")).toBe(true);
+
+    const evening = suggestTimes({ ...base, days: 3, kind: "family", durationMinutes: 90, participantIds: ["a", "s"], carerIds: [], hasChildren: true, busy: [] });
+    expect(evening.every((s) => s.endTime <= "19:30")).toBe(true);
+
+    // Stargazing waits for dusk, never breakfast.
+    const stars = suggestTimes({ ...base, days: 7, kind: "family", durationMinutes: 60, participantIds: ["a", "s"], carerIds: [], hasChildren: true, busy: [], startBetween: ["17:30", "18:30"] });
+    expect(stars.length).toBeGreaterThan(0);
+    expect(stars.every((s) => s.startTime >= "17:30" && s.startTime <= "18:30")).toBe(true);
+  });
 });

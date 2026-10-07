@@ -23,6 +23,9 @@
   --warn: #865500;
   --bad: #b3261e;
   --focus: #1f6feb;
+  --shadow-color: 38 30 20;
+  --hero-a: #2f5d50;
+  --hero-b: #3f7a66;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -48,6 +51,9 @@
     --good: #7ccf9c;
     --warn: #e7b54f;
     --bad: #ff8a80;
+    --shadow-color: 0 0 0;
+    --hero-a: #1f3d35;
+    --hero-b: #2a5446;
   }
 }
 
@@ -82,7 +88,10 @@ html {
 }
 
 body {
-  background: var(--bg);
+  background:
+    radial-gradient(120% 60% at 100% 0%, color-mix(in srgb, var(--brand-soft) 70%, transparent) 0%, transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--ink);
   font-family: var(--font-sans);
 }
@@ -95,7 +104,72 @@ body {
 
 dialog::backdrop {
   background: rgb(20 18 15 / 0.45);
+  backdrop-filter: blur(3px);
 }
+
+dialog[open] {
+  animation: sheet-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes sheet-in {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+/* Gentle entrance for page sections; --i staggers siblings. */
+.rise {
+  animation: rise 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+@keyframes rise {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+.pop {
+  animation: pop 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes toast-in {
+  from { transform: translateY(16px) scale(0.98); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes confetti {
+  0% { transform: translate(0, 0) rotate(0); opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) rotate(var(--r)); opacity: 0; }
+}
+
+.shadow-soft {
+  box-shadow: 0 1px 2px rgb(var(--shadow-color) / 0.05), 0 4px 16px -6px rgb(var(--shadow-color) / 0.10);
+}
+
+.shadow-lift {
+  box-shadow: 0 2px 4px rgb(var(--shadow-color) / 0.06), 0 12px 32px -12px rgb(var(--shadow-color) / 0.22);
+}
+
+/* Native selects, styled to match the rest of the controls. */
+select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%236b665d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  padding-right: 2.25rem !important;
+}
+
+input[type="radio"], input[type="checkbox"] {
+  accent-color: var(--brand);
+}
+
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

@@ -1,5 +1,6 @@
 "use client";
 
+import { X } from "lucide-react";
 import { forwardRef, useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 
 export function cx(...parts: (string | false | null | undefined)[]): string {
@@ -14,9 +15,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLBut
       <button
         ref={ref}
         className={cx(
-          "inline-flex items-center justify-center gap-1.5 rounded-full font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+          "inline-flex select-none items-center justify-center gap-1.5 rounded-full font-medium transition-[background-color,transform,box-shadow] duration-150 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100",
           size === "sm" ? "min-h-9 px-3 text-sm" : "min-h-11 px-4 text-[15px]",
-          variant === "primary" && "bg-brand text-brand-ink hover:opacity-90",
+          variant === "primary" && "bg-brand text-brand-ink shadow-soft hover:brightness-110",
           variant === "secondary" && "border border-line bg-surface text-ink hover:bg-surface-2",
           variant === "ghost" && "text-ink-2 hover:bg-surface-2",
           variant === "danger" && "border border-bad/40 bg-surface text-bad hover:bg-bad/10",
@@ -50,11 +51,12 @@ export function Field({ label, hint, error, children }: { label: string; hint?: 
 export const inputClass =
   "min-h-11 w-full rounded-xl border border-line bg-surface px-3 text-[15px] text-ink placeholder:text-ink-3 focus:border-brand focus:outline-none";
 
-export function Card({ children, className, tone }: { children: ReactNode; className?: string; tone?: "me" | "us" | "family" | "care" | "neutral" }) {
+export function Card({ children, className, tone, style }: { children: ReactNode; className?: string; tone?: "me" | "us" | "family" | "care" | "neutral"; style?: React.CSSProperties }) {
   return (
     <div
+      style={style}
       className={cx(
-        "rounded-2xl border border-line bg-surface p-4",
+        "rounded-2xl border border-line/70 bg-surface p-4 shadow-soft",
         tone === "me" && "border-l-4 border-l-me",
         tone === "us" && "border-l-4 border-l-us",
         tone === "family" && "border-l-4 border-l-family",
@@ -115,7 +117,7 @@ export function Dialog({ open, onClose, title, children, footer }: { open: boole
               {title}
             </h2>
             <button onClick={onClose} className="rounded-full p-2 text-ink-2 hover:bg-surface-2" aria-label="Close">
-              ✕
+              <X aria-hidden size={20} />
             </button>
           </div>
           <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
@@ -126,20 +128,68 @@ export function Dialog({ open, onClose, title, children, footer }: { open: boole
   );
 }
 
-export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
+const EMPTY_TONE = {
+  brand: "bg-brand-soft text-brand",
+  me: "bg-me-soft text-me",
+  us: "bg-us-soft text-us",
+  family: "bg-family-soft text-family",
+} as const;
+
+/**
+ * A friendly empty state: a small illustration built from an icon, a title,
+ * one line of why, and one clear next step. Pass the icon as an element
+ * (`icon={<MapPin />}`) so server pages can use it too.
+ */
+export function EmptyState({ title, children, icon, tone = "brand", action }: { title: string; children?: ReactNode; icon?: ReactNode; tone?: keyof typeof EMPTY_TONE; action?: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-dashed border-line px-5 py-8 text-center">
-      <p className="font-medium text-ink">{title}</p>
-      {children && <div className="mt-2 text-sm text-ink-2">{children}</div>}
+    <div className="rise flex flex-col items-center rounded-3xl border border-dashed border-line bg-surface/60 px-6 py-9 text-center">
+      {icon && (
+        <div className="relative mb-4" aria-hidden>
+          <span className={cx("absolute -left-3 top-1 size-2.5 rounded-full opacity-60", EMPTY_TONE[tone])} />
+          <span className={cx("absolute -right-2 -top-1 size-4 rounded-full opacity-50", EMPTY_TONE[tone])} />
+          <span className={cx("absolute -bottom-1 right-[-14px] size-2 rounded-full opacity-70", EMPTY_TONE[tone])} />
+          <div className={cx("pop grid size-16 rotate-[-6deg] place-items-center rounded-[1.4rem] shadow-soft [&_svg]:size-8 [&_svg]:rotate-[6deg]", EMPTY_TONE[tone])}>{icon}</div>
+        </div>
+      )}
+      <p className="font-display text-xl text-ink">{title}</p>
+      {children && <div className="mt-1.5 max-w-sm text-[15px] leading-relaxed text-ink-2">{children}</div>}
+      {action && <div className="mt-5">{action}</div>}
     </div>
   );
 }
 
-export function SectionTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
+/** A selectable card for one-of-many choices, with a real radio inside. */
+export function ChoiceCard({ name, checked, onChange, children }: { name: string; checked: boolean; onChange: () => void; children: ReactNode }) {
   return (
-    <div className="mb-3 mt-8 flex items-center justify-between gap-3 first:mt-0">
-      <h2 className="font-display text-lg text-ink">{children}</h2>
-      {action}
+    <label
+      className={cx(
+        "group relative flex cursor-pointer gap-3 rounded-2xl border bg-surface p-3.5 transition-[border-color,background-color,box-shadow,transform] duration-150 active:scale-[0.99]",
+        checked ? "border-brand bg-brand-soft/60 shadow-soft" : "border-line hover:border-ink-3/40",
+      )}
+    >
+      <input type="radio" name={name} className="peer sr-only" checked={checked} onChange={onChange} />
+      <span
+        aria-hidden
+        className={cx(
+          "mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border-2 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-[var(--focus)]",
+          checked ? "border-brand bg-brand" : "border-line bg-surface",
+        )}
+      >
+        {checked && <span className="pop size-2 rounded-full bg-brand-ink" />}
+      </span>
+      <span className="min-w-0 flex-1">{children}</span>
+    </label>
+  );
+}
+
+export function SectionTitle({ children, action, hint }: { children: ReactNode; action?: ReactNode; hint?: ReactNode }) {
+  return (
+    <div className="mb-3 mt-10">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="font-display text-xl text-ink">{children}</h2>
+        {action}
+      </div>
+      {hint && <p className="mt-1 text-sm text-ink-3">{hint}</p>}
     </div>
   );
 }
@@ -153,7 +203,7 @@ export function Segmented<T extends string>({ value, options, onChange, label }:
           role="radio"
           aria-checked={value === o.value}
           onClick={() => onChange(o.value)}
-          className={cx("min-h-9 rounded-full px-3 text-sm", value === o.value ? "bg-brand text-brand-ink" : "text-ink-2 hover:bg-surface-2")}
+          className={cx("min-h-9 rounded-full px-3 text-sm transition-colors duration-150", value === o.value ? "bg-brand text-brand-ink shadow-soft" : "text-ink-2 hover:bg-surface-2")}
         >
           {o.label}
         </button>

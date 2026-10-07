@@ -16,7 +16,19 @@ export function BalanceCard({ balance }: { balance: Balance }) {
       <SectionTitle>How time has been shared</SectionTitle>
       <Card className="flex flex-col gap-3">
         <p className="text-sm text-ink-3">Agreed and completed plans since {fmtDate(balance.since, { weekday: false })}, plus Me time booked for the next two weeks.</p>
-        <div className="overflow-x-auto">
+        <ul className="grid gap-2 sm:hidden">
+          {balance.adults.map((a) => (
+            <li key={a.id} className="rounded-2xl bg-surface-2/70 p-3">
+              <p className="font-medium">{a.id === app.me.id ? "You" : a.displayName}</p>
+              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2">
+                {[["Me time had", h(a.meDone)], ["Me time booked", h(a.mePlanned)], ["Childcare", h(a.careHours)], ["Tasks done", a.tasksDone || "–"]].map(([k, v]) => (
+                  <div key={k}><dt className="text-xs text-ink-3">{k}</dt><dd className="font-display text-lg leading-tight">{v}</dd></div>
+                ))}
+              </dl>
+            </li>
+          ))}
+        </ul>
+        <div className="hidden overflow-x-auto sm:block">
           <table className="w-full text-left text-[15px]">
             <thead>
               <tr className="text-xs text-ink-3">

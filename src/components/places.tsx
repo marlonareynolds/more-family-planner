@@ -1,5 +1,6 @@
 "use client";
 
+import { MapPin } from "lucide-react";
 import { useState } from "react";
 import { CATEGORIES, CATEGORY_LABEL, type Category, type Setting } from "@/lib/catalogue";
 import type { PlaceView } from "@/lib/places";
@@ -30,7 +31,7 @@ export function PlacesBoard() {
         </div>
       )}
       {shown.length === 0 ? (
-        <EmptyState title={app.places.length ? "None for that yet." : "No places yet."}>Start with two or three you&apos;d happily go back to.</EmptyState>
+        <EmptyState icon={<MapPin />} tone="family" title={app.places.length ? "None for that yet." : "Your favourite spots live here."} action={<Button variant="primary" onClick={() => setEditing("new")}>Add a place</Button>}>{app.places.length ? "Try another filter, or add one that fits." : "The café with the good highchairs, the walk that tires everyone out. Save two or three and they come first in your ideas."}</EmptyState>
       ) : (
         <ul className="grid gap-3 sm:grid-cols-2">
           {shown.map((p) => (

@@ -3,6 +3,7 @@ import type { Db } from "@/db/client";
 import { accounts, calendarFeeds, checkins, children, memberships } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import { suggestTimes, type MomentKind, type SuggestedTime } from "@/domain/free-time";
+import { bankHoliday } from "@/lib/bank-holidays";
 import { currentWeekKey } from "@/domain/time";
 import type { Actor } from "../auth";
 import { STALE_AFTER_MS } from "../calendar-sync";
@@ -17,7 +18,7 @@ export interface FreeTimes {
   lighterWeek: boolean;
 }
 
-export async function freeTimesFor(db: Db, actor: Actor, kind: MomentKind, minutes: number, now = new Date(), days = 14): Promise<FreeTimes> {
+export async function freeTimesFor(db: Db, actor: Actor, kind: MomentKind, minutes: number, now = new Date(), days = 14, startBetween?: readonly [string, string]): Promise<FreeTimes> {
   const household = await householdFor(db, actor);
   if (!household) throw new DomainError("NOT_FOUND", "You are not in a household.");
   const adults = await db
@@ -44,6 +45,8 @@ export async function freeTimesFor(db: Db, actor: Actor, kind: MomentKind, minut
     hasChildren: kids.length > 0,
     busy,
     childBusy,
+    dayOff: (date) => !!bankHoliday(date, household.timeZone),
+    startBetween,
   });
 
   const feeds = await db.select().from(calendarFeeds).where(eq(calendarFeeds.householdId, household.id));

@@ -1,5 +1,6 @@
 "use client";
 
+import { NotebookPen } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useSyncExternalStore } from "react";
@@ -116,7 +117,7 @@ export function Journal({ data, q, tag, paged, checkinDone }: { data: JournalDat
       )}
 
       {data.entries.length === 0 ? (
-        <EmptyState title={q || tag ? "No entries match." : "Nothing written yet."}>{q || tag ? "Try another word or tag." : "A line a day is plenty."}</EmptyState>
+        <EmptyState icon={<NotebookPen />} tone="me" title={q || tag ? "No entries match." : "Your private journal."}>{q || tag ? "Try another word or tag." : "Only you can read it. A line a day is plenty."}</EmptyState>
       ) : (
         <ul className="flex flex-col gap-3">
           {data.entries.map((e) => (

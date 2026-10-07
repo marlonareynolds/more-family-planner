@@ -1,5 +1,6 @@
 "use client";
 
+import { ListChecks } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { JOB_STARTERS, type JobCadence } from "@/domain/jobs";
@@ -126,7 +127,7 @@ export function JobsBoard({ data }: { data: JobsView }) {
 
       <SectionTitle action={<Button size="sm" onClick={() => setAdding(true)}>+ Add a job</Button>}>All jobs</SectionTitle>
       {rest.length === 0 && due.length === 0 ? (
-        <EmptyState title="No jobs yet.">Start with a few that cause the most “did you…?” moments.</EmptyState>
+        <EmptyState icon={<ListChecks />} title="No jobs shared out yet." action={<Button variant="primary" onClick={() => setAdding(true)}>Add a job</Button>}>Start with the few that cause the most “did you…?” moments. Each one gets a single owner, agreed by both of you.</EmptyState>
       ) : rest.length > 0 ? (
         <Card><ul className="divide-y divide-line">{rest.map((j) => <JobRow key={j.id} job={j} today={today} />)}</ul></Card>
       ) : null}

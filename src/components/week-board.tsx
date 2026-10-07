@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowRight, Backpack, Cake, CalendarDays, Heart, Leaf, Plus, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import type { WeekEvent, WeekView, MomentView } from "@/server/queries/week";
@@ -9,6 +10,8 @@ import { EventEditor } from "./event-editor";
 import { MomentCard } from "./moment-card";
 import { MomentEditor, type MomentKind } from "./moment-editor";
 import { Badge, Button, Dialog, Segmented, cx } from "./ui";
+
+const CHOICE = "flex min-h-14 items-center gap-3 rounded-2xl border border-line px-3 text-left text-[15px] transition-colors hover:bg-surface-2 active:scale-[0.99]";
 
 type Item =
   | { type: "event"; start: number; end: number; e: WeekEvent }
@@ -72,11 +75,35 @@ export function WeekBoard({ week, mode = "week" }: { week: WeekView; mode?: "wee
         </p>
       )}
 
-      <div className={cx(view === "grid" && mode === "week" ? "grid gap-3 md:grid-cols-7" : "flex flex-col gap-6")}>
+      {mode === "week" && week.days.every((d) => (days.get(d) ?? []).length === 0) && (
+        <Link href="/plan" className="rise group mb-4 flex items-center gap-3 rounded-2xl bg-brand-soft px-4 py-3 text-brand">
+          <Sparkles aria-hidden size={20} className="shrink-0" />
+          <span className="flex-1"><span className="block font-medium">A blank week, full of possibility.</span><span className="block text-sm text-ink-2">Plan it together in ten minutes: one thing for each of you.</span></span>
+          <ArrowRight aria-hidden size={18} className="transition-transform group-hover:translate-x-0.5" />
+        </Link>
+      )}
+
+      <div className={cx(view === "grid" && mode === "week" ? "grid gap-3 md:grid-cols-7" : "flex flex-col gap-3")}>
         {week.days.map((date) => {
           const list = days.get(date) ?? [];
+          if (list.length === 0 && view === "agenda") {
+            // A free day is one quiet line, not a paragraph repeated seven times.
+            return (
+              <section key={date} aria-labelledby={`d-${date}`} className={cx("flex min-h-12 items-center justify-between gap-3 rounded-2xl border border-dashed px-4", date === today ? "border-brand/40" : "border-line")}>
+                <h2 id={`d-${date}`} className={cx("text-sm font-semibold uppercase tracking-wide", date === today ? "text-brand" : "text-ink-3")}>
+                  {date === today ? "Today · " : ""}
+                  {fmtDate(date)}
+                  {week.markers[date] && <span className="ml-2 rounded-full bg-family-soft px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-family">{week.markers[date]}</span>}
+                </h2>
+                <span className="flex items-center gap-2 text-sm text-ink-3">
+                  Free
+                  {mode === "week" && <button className="flex min-h-9 items-center gap-1 rounded-full px-2 text-brand hover:bg-brand-soft" onClick={() => setChooser(date)} aria-label={`Add on ${fmtDate(date)}`}><Plus aria-hidden size={15} />Add</button>}
+                </span>
+              </section>
+            );
+          }
           return (
-            <section key={date} aria-labelledby={`d-${date}`} className={cx(view === "grid" && mode === "week" && "min-w-0")}>
+            <section key={date} aria-labelledby={`d-${date}`} className={cx(view === "grid" && mode === "week" ? "min-w-0" : "py-1")}>
               <div className="mb-2 flex items-center justify-between">
                 <h2 id={`d-${date}`} className={cx("text-sm font-semibold uppercase tracking-wide", date === today ? "text-brand" : "text-ink-3")}>
                   {date === today ? "Today · " : ""}
@@ -84,11 +111,11 @@ export function WeekBoard({ week, mode = "week" }: { week: WeekView; mode?: "wee
                   {week.markers[date] && <span className="ml-2 rounded-full bg-family-soft px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-family">{week.markers[date]}</span>}
                 </h2>
                 {mode === "week" && view === "agenda" && (
-                  <button className="rounded-full px-2 text-sm text-brand" onClick={() => setChooser(date)} aria-label={`Add on ${fmtDate(date)}`}>+ Add</button>
+                  <button className="flex min-h-9 items-center gap-1 rounded-full px-2 text-sm text-brand hover:bg-brand-soft" onClick={() => setChooser(date)} aria-label={`Add on ${fmtDate(date)}`}><Plus aria-hidden size={15} />Add</button>
                 )}
               </div>
               {list.length === 0 ? (
-                <p className="text-sm text-ink-3">{view === "grid" ? "–" : "Nothing planned. Rest is valid too."}</p>
+                <p className="text-sm text-ink-3">–</p>
               ) : (
                 <ul className="flex flex-col gap-2">
                   {list.map((it, i) => (
@@ -108,12 +135,22 @@ export function WeekBoard({ week, mode = "week" }: { week: WeekView; mode?: "wee
       {chooser && (
         <Dialog open onClose={() => setChooser(null)} title={`Add on ${fmtDate(chooser)}`}>
           <div className="grid gap-2">
-            <Button className="justify-start" onClick={() => { setNewEvent(chooser); setChooser(null); }}>▦ Something in the diary</Button>
-            <Button className="justify-start" onClick={() => { setNewMoment({ kind: "me", date: chooser }); setChooser(null); }}>◐ Time for me</Button>
-            <Button className="justify-start" onClick={() => { setNewMoment({ kind: "us", date: chooser }); setChooser(null); }}>♥ Time for us</Button>
-            <Button className="justify-start" onClick={() => { setNewMoment({ kind: "family", date: chooser }); setChooser(null); }}>✿ Family time</Button>
-            <Button className="justify-start" onClick={() => { setNewDate(chooser); setChooser(null); }}>★ Birthday, anniversary or other yearly date</Button>
-            <Link className="rounded-full border border-line px-4 py-2.5 text-[15px]" href={`/holidays?date=${chooser}`}>☂ Childcare</Link>
+            {([
+              { label: "Something in the diary", icon: CalendarDays, tone: "bg-surface-2 text-ink-2", go: () => setNewEvent(chooser) },
+              { label: "Time for me", icon: Leaf, tone: "bg-me-soft text-me", go: () => setNewMoment({ kind: "me", date: chooser }) },
+              { label: "Time for us", icon: Heart, tone: "bg-us-soft text-us", go: () => setNewMoment({ kind: "us", date: chooser }) },
+              { label: "Family time", icon: Users, tone: "bg-family-soft text-family", go: () => setNewMoment({ kind: "family", date: chooser }) },
+              { label: "Birthday, anniversary or other yearly date", icon: Cake, tone: "bg-brand-soft text-brand", go: () => setNewDate(chooser) },
+            ] as const).map((o) => (
+              <button key={o.label} type="button" className={CHOICE} onClick={() => { o.go(); setChooser(null); }}>
+                <span className={cx("grid size-9 shrink-0 place-items-center rounded-full", o.tone)}><o.icon aria-hidden size={18} /></span>
+                {o.label}
+              </button>
+            ))}
+            <Link className={CHOICE} href={`/holidays?date=${chooser}`}>
+              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-care-soft text-care"><Backpack aria-hidden size={18} /></span>
+              Childcare
+            </Link>
           </div>
         </Dialog>
       )}

@@ -61,12 +61,13 @@ export async function picksFor(
   const candidates = [...own, ...matchActivities({ kind, childAgeBands: [...new Set(kids.map((k) => k.ageBand as AgeBand))] })].filter((a) => slotMinutes(a) !== null);
   const chosen = choosePicks({ candidates, guidance, recent, lighterWeek, seed: `${household.id}:${currentWeekKey(household.timeZone, now.getTime())}`, count });
 
-  const cache = new Map<number, Awaited<ReturnType<typeof freeTimesFor>>>();
+  // One free-time search per length and time of day, shared between picks.
+  const cache = new Map<string, Awaited<ReturnType<typeof freeTimesFor>>>();
+  const keyOf = (a: (typeof chosen)[number]) => `${slotMinutes(a)}|${a.startBetween?.join("-") ?? ""}`;
   for (const a of chosen) {
-    const mins = slotMinutes(a)!;
-    if (!cache.has(mins)) cache.set(mins, await freeTimesFor(db, actor, kind, mins, from, days));
+    if (!cache.has(keyOf(a))) cache.set(keyOf(a), await freeTimesFor(db, actor, kind, slotMinutes(a)!, from, days, a.startBetween));
   }
-  const slots = pairSlots(chosen, (a) => cache.get(slotMinutes(a)!)?.slots ?? []);
+  const slots = pairSlots(chosen, (a) => cache.get(keyOf(a))?.slots ?? []);
   const partner = adults.find((a) => a.id !== actor.accountId);
   const firstHelper = village[0];
 
