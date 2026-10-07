@@ -32,6 +32,19 @@ function longDate(date: string): string {
   return `${LONG_DAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${d} ${LONG_MONTHS[m - 1]}`;
 }
 
+/** ISO 8601 week number, as printed in diaries. */
+function isoWeek(date: string): number {
+  const [y, m, d] = date.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  const day = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - day);
+  const yearStart = Date.UTC(t.getUTCFullYear(), 0, 1);
+  return Math.ceil(((t.getTime() - yearStart) / 86_400_000 + 1) / 7);
+}
+
+const stubDay = (m: MomentView, tz: string) => Number(localParts(m.start, tz).date.slice(8, 10));
+const stubMonth = (m: MomentView, tz: string) => LONG_MONTHS[Number(localParts(m.start, tz).date.slice(5, 7)) - 1].slice(0, 3);
+
 /** "Tonight", "Tomorrow at 19:30", "Friday at 10:00", "Sat 18 Oct". */
 function whenLabel(m: MomentView, today: string, tz: string): string {
   const { date, time } = localParts(m.start, tz);
@@ -94,45 +107,64 @@ export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
   return (
     <div>
       <header className="rise">
-        <p className="text-sm font-medium uppercase tracking-wide text-ink-3">{longDate(today)}</p>
-        <h1 className="mt-1 font-display text-[2rem] leading-tight">{greeting(hour)}, {app.me.displayName}</h1>
+        <div className="flex items-baseline justify-between border-b-2 border-ink pb-1.5">
+          <p className="label-caps text-ink">{longDate(today)}</p>
+          <p className="label-caps text-ink-3">Week {isoWeek(today)}</p>
+        </div>
+        <h1 className="mt-4 font-display text-[2.5rem] leading-[1.02]">
+          {greeting(hour)},<br />
+          <em className="text-brand">{app.me.displayName}.</em>
+        </h1>
       </header>
 
-      <section aria-label="Your week at a glance" className="rise shadow-lift relative mt-5 overflow-hidden rounded-3xl p-5 text-white" style={{ ["--i" as string]: 1, background: "linear-gradient(135deg, var(--hero-a), var(--hero-b))" }}>
-        <svg aria-hidden viewBox="0 0 200 200" className="absolute -right-10 -top-12 size-48 opacity-15">
-          <circle cx="100" cy="100" r="80" fill="none" stroke="currentColor" strokeWidth="18" />
-          <circle cx="100" cy="100" r="40" fill="currentColor" />
-        </svg>
-        <p className="text-sm/5 text-white/75">Up next</p>
-        {next ? (
-          <Link href="/week" className="group mt-1 block">
-            <p className="font-display text-2xl leading-snug">{next.title}</p>
-            <p className="mt-0.5 flex items-center gap-1 text-white/85">{whenLabel(next, today, app.timeZone)} <ArrowRight aria-hidden size={16} className="transition-transform group-hover:translate-x-0.5" /></p>
-          </Link>
-        ) : (
-          <div className="mt-1">
-            <p className="font-display text-2xl leading-snug">Nothing booked yet</p>
-            <p className="mt-0.5 text-white/85">Ten minutes together fills the week with something to look forward to.</p>
-            <Link href="/plan" className="mt-3 inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white px-4 text-sm font-medium text-[var(--hero-a)] shadow-soft transition-transform active:scale-[0.97]">
-              <Sparkles aria-hidden size={16} /> Plan the week
-            </Link>
+      <section aria-label="Your week at a glance" className="rise mt-6" style={{ ["--i" as string]: 1 }}>
+        <div className="shadow-lift relative flex overflow-hidden rounded-[14px] bg-brand text-brand-ink">
+          <div className="min-w-0 flex-1 p-5">
+            <p className="label-caps opacity-75">Up next</p>
+            {next ? (
+              <Link href="/week" className="group mt-2 block">
+                <p className="font-display text-[1.75rem] italic leading-tight">{next.title}</p>
+                <p className="mt-1 flex items-center gap-1 opacity-85">{whenLabel(next, today, app.timeZone)} <ArrowRight aria-hidden size={16} className="transition-transform group-hover:translate-x-0.5" /></p>
+              </Link>
+            ) : (
+              <div className="mt-2">
+                <p className="font-display text-[1.75rem] italic leading-tight">Nothing booked yet.</p>
+                <p className="mt-1 text-[15px] opacity-85">Ten minutes together fills the week with something to look forward to.</p>
+                <Link href="/plan" className="mt-4 inline-flex min-h-10 items-center gap-1.5 rounded-full bg-brand-ink px-4 text-sm font-semibold text-brand transition-transform active:scale-[0.97]">
+                  <Sparkles aria-hidden size={16} /> Plan the week
+                </Link>
+              </div>
+            )}
           </div>
-        )}
-        <dl className="mt-5 grid grid-cols-3 gap-2 border-t border-white/15 pt-4 text-center">
-          <div><dt className="text-xs text-white/70">Agreed plans</dt><dd className="font-display text-2xl">{agreed.length}</dd></div>
-          <div><dt className="text-xs text-white/70">Time for you</dt><dd className="font-display text-2xl">{meHours ? `${meHours}h` : "–"}</dd></div>
-          <div><dt className="text-xs text-white/70">Your jobs due</dt><dd className="font-display text-2xl">{jobsDue}</dd></div>
+          {/* The stub: torn along the dashed line, with the date of the next plan. */}
+          <div aria-hidden className="relative flex w-[5.5rem] shrink-0 flex-col items-center justify-center border-l-2 border-dashed border-brand-ink/30 text-center">
+            <span className="absolute -left-[9px] -top-2 size-4 rounded-full bg-bg" />
+            <span className="absolute -bottom-2 -left-[9px] size-4 rounded-full bg-bg" />
+            {next ? (
+              <>
+                <span className="label-caps opacity-75">{stubMonth(next, app.timeZone)}</span>
+                <span className="font-display text-[2.6rem] leading-none">{stubDay(next, app.timeZone)}</span>
+              </>
+            ) : (
+              <span className="font-display text-[2.6rem] italic leading-none opacity-60">?</span>
+            )}
+          </div>
+        </div>
+        <dl className="mt-3 grid grid-cols-3 divide-x divide-line rounded-[14px] border border-line bg-surface text-center">
+          <div className="px-2 py-3"><dt className="label-caps text-ink-3">Agreed</dt><dd className="mt-0.5 font-display text-[1.7rem] leading-none">{agreed.length}</dd></div>
+          <div className="px-2 py-3"><dt className="label-caps text-ink-3">For you</dt><dd className="mt-0.5 font-display text-[1.7rem] leading-none">{meHours ? `${meHours}h` : "–"}</dd></div>
+          <div className="px-2 py-3"><dt className="label-caps text-ink-3">Jobs due</dt><dd className="mt-0.5 font-display text-[1.7rem] leading-none">{jobsDue}</dd></div>
         </dl>
       </section>
 
       {doneSteps < steps.length && (
         <Card className="rise mt-5" style={{ ["--i" as string]: 2 }}>
           <div className="flex items-center justify-between gap-3">
-            <h2 className="font-display text-lg">Getting set up</h2>
-            <span className="text-sm text-ink-3">{doneSteps} of {steps.length}</span>
+            <h2 className="font-display text-[1.3rem] italic">Getting set up</h2>
+            <span className="label-caps text-ink-3">{doneSteps} of {steps.length}</span>
           </div>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-2" aria-hidden>
-            <div className="h-full rounded-full bg-brand transition-[width] duration-700" style={{ width: `${(doneSteps / steps.length) * 100}%` }} />
+            <div className="h-full rounded-full bg-accent transition-[width] duration-700" style={{ width: `${(doneSteps / steps.length) * 100}%` }} />
           </div>
           <ul className="mt-3 flex flex-col">
             {steps.map((s) => (

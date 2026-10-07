@@ -4,7 +4,9 @@ import { useState } from "react";
 import type { ExpenseView, MomentView } from "@/server/queries/week";
 import { useApp, useNow } from "./app-context";
 import { fmtDateTime, fmtMoney, fmtRange, fmtTime, localParts, minorToInput, toMinor } from "./format";
+import { DATE_NIGHT_KEY, menuFromNotes } from "@/lib/date-night";
 import { AskHelperDialog } from "./ask-helper";
+import { MenuCard } from "./date-night";
 import { MomentEditor } from "./moment-editor";
 import { PlaceEditor } from "./places";
 import { Badge, Button, Card, Checkbox, Dialog, ErrorNote, Field, inputClass } from "./ui";
@@ -37,6 +39,8 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
     !app.places.some((p) => p.name.toLowerCase() === placeName.toLowerCase());
 
   const now = useNow();
+  // A date night invitation opens as its painted menu.
+  const menu = m.activityKey === DATE_NIGHT_KEY && !m.detailsHidden ? menuFromNotes(m.notes) : null;
   const tone = m.momentKind;
   const awaitingMe = m.lifecycle === "planned" && m.sharing === "shared" && m.participantIds.includes(app.me.id) && m.myDecision !== "accepted";
   const iAmIn = m.participantIds.includes(app.me.id) || m.organiserId === app.me.id;
@@ -65,8 +69,14 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
 
       {!compact && (
         <div className="mt-3 space-y-2 text-sm text-ink-2">
-          {m.location && <p>📍 {m.location}</p>}
-          {m.notes && <p className="whitespace-pre-line">{m.notes}</p>}
+          {menu ? (
+            <div className="-mx-1 my-1"><MenuCard compact menu={{ ...menu, location: m.location || undefined }} when={fmtDateTime(m.start, app.timeZone)} from={app.adults.find((a) => a.id === m.organiserId)?.displayName ?? "you"} /></div>
+          ) : (
+            <>
+              {m.location && <p>📍 {m.location}</p>}
+              {m.notes && <p className="whitespace-pre-line">{m.notes}</p>}
+            </>
+          )}
           {(m.travelBeforeMinutes > 0 || m.travelAfterMinutes > 0) && (
             <p>Travel: {m.travelBeforeMinutes} min before, {m.travelAfterMinutes} min after</p>
           )}

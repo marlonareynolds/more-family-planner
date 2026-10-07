@@ -129,6 +129,19 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   await alex.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
   await expect(alex.getByRole("heading", { name: "The Boathouse" })).toBeVisible();
 
+  // The date night concierge composes a menu and sends it as an invitation
+  await go(alex, "/us/date-night");
+  await alex.getByRole("radio", { name: /Cosy, at home/ }).click();
+  await expect(alex.getByRole("article", { name: "Menu du soir" })).toBeVisible();
+  await expect(alex.getByRole("radiogroup", { name: "Date and time" })).toBeVisible();
+  await axe(alex);
+  await alex.getByRole("button", { name: /Another main/ }).click();
+  await alex.getByRole("button", { name: /Send the invitation/ }).click();
+  await alex.waitForURL(/\/us$/);
+  await go(sam, "/today");
+  await expect(sam.getByRole("article", { name: "Menu du soir" }).first()).toBeVisible();
+  await axe(sam);
+
   // Remaining screens render and pass axe
   for (const path of ["/today", "/family", "/holidays", "/plan", "/look-back", "/settings"]) {
     await go(sam, path);

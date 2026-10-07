@@ -121,7 +121,7 @@ export function WeekBoard({ week, mode = "week" }: { week: WeekView; mode?: "wee
                   {list.map((it, i) => (
                     <li key={i}>
                       {it.type === "event" && <EventRow e={it.e} onOpen={() => setEditingEvent(it.e)} compact={view === "grid"} />}
-                      {it.type === "moment" && <MomentCard moment={it.m} expense={week.expenses.find((x) => x.id === it.m.expenseId)} compact={view === "grid"} />}
+                      {it.type === "moment" && <MomentCard moment={it.m} expense={week.expenses.find((x) => x.id === it.m.expenseId)} compact={view === "grid" || mode === "today"} />}
                       {it.type === "care" && <CareRow g={it.g} date={date} />}
                     </li>
                   ))}

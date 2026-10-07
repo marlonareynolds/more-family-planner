@@ -60,10 +60,10 @@ export function NavBar({ householdName, myName }: { householdName: string; myNam
       </a>
 
       {/* Phone: a quiet top bar, five main places at the bottom, the rest in a menu. */}
-      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-line/60 bg-bg/85 px-4 py-2.5 backdrop-blur md:hidden">
+      <header className="sticky top-0 z-40 flex items-center justify-between border-b border-line bg-bg/90 px-4 py-2.5 backdrop-blur md:hidden">
         <Link href="/today" className="flex items-baseline gap-2">
-          <span className="font-display text-2xl text-brand">More</span>
-          <span className="max-w-[45vw] truncate text-sm text-ink-3">{householdName}</span>
+          <span className="font-display text-[1.7rem] italic leading-none text-brand">More<span className="text-accent">.</span></span>
+          <span className="label-caps max-w-[45vw] truncate text-ink-3">{householdName}</span>
         </Link>
         <button
           type="button"
@@ -80,10 +80,10 @@ export function NavBar({ householdName, myName }: { householdName: string; myNam
       {open && (
         <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true" aria-label="Menu" id="more-menu">
           <button aria-label="Close menu" className="absolute inset-0 bg-ink/40 backdrop-blur-[2px]" onClick={() => setOpen(false)} />
-          <div className="shadow-lift absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-y-auto rounded-t-3xl bg-surface px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-3" style={{ animation: "sheet-in 260ms cubic-bezier(0.2,0.8,0.2,1)" }}>
+          <div className="absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-y-auto rounded-t-[20px] border-t border-line bg-surface px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-3" style={{ animation: "sheet-in 260ms cubic-bezier(0.2,0.8,0.2,1)" }}>
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line" aria-hidden />
             <div className="mb-2 flex items-center justify-between">
-              <p className="font-display text-xl">{householdName}</p>
+              <p className="font-display text-[1.4rem] italic">{householdName}</p>
               <button onClick={() => setOpen(false)} className="rounded-full p-2 text-ink-2 hover:bg-surface-2" aria-label="Close menu">
                 <X aria-hidden size={20} />
               </button>
@@ -96,9 +96,9 @@ export function NavBar({ householdName, myName }: { householdName: string; myNam
                       href={s.href}
                       onClick={() => setOpen(false)}
                       aria-current={active(s.href) ? "page" : undefined}
-                      className={cx("flex h-full min-h-20 flex-col gap-1 rounded-2xl border p-3 transition-colors", active(s.href) ? "border-brand/40 bg-brand-soft" : "border-line bg-bg/50 hover:bg-surface-2")}
+                      className={cx("flex h-full min-h-20 flex-col gap-1 rounded-[12px] border p-3 transition-colors", active(s.href) ? "border-brand bg-brand-soft" : "border-line bg-bg/50 hover:bg-surface-2")}
                     >
-                      <s.icon aria-hidden size={20} className="text-brand" />
+                      <s.icon aria-hidden size={20} strokeWidth={1.6} className="text-brand" />
                       <span className="font-medium leading-tight">{s.label}</span>
                       {s.hint && <span className="text-xs leading-snug text-ink-3">{s.hint}</span>}
                     </Link>
@@ -114,16 +114,15 @@ export function NavBar({ householdName, myName }: { householdName: string; myNam
         </div>
       )}
 
-      <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-40 border-t border-line/60 bg-surface/90 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+      <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-bg/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
         <ul className="grid grid-cols-5">
           {primary.map((p) => {
             const on = active(p.href);
             return (
               <li key={p.href}>
-                <Link href={p.href} aria-current={on ? "page" : undefined} className={cx("flex min-h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors", on ? "text-brand" : "text-ink-3")}>
-                  <span className={cx("grid h-7 w-12 place-items-center rounded-full transition-colors duration-200", on && "bg-brand-soft")}>
-                    <p.icon aria-hidden size={20} strokeWidth={on ? 2.4 : 1.8} />
-                  </span>
+                <Link href={p.href} aria-current={on ? "page" : undefined} className={cx("relative flex min-h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors", on ? "text-brand" : "text-ink-3")}>
+                  <span aria-hidden className={cx("absolute top-0 h-[3px] w-8 rounded-b-full bg-accent transition-transform duration-200", on ? "scale-x-100" : "scale-x-0")} />
+                  <p.icon aria-hidden size={21} strokeWidth={on ? 2 : 1.6} />
                   {p.label}
                 </Link>
               </li>
@@ -132,10 +131,10 @@ export function NavBar({ householdName, myName }: { householdName: string; myNam
         </ul>
       </nav>
 
-      <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col gap-6 overflow-y-auto border-r border-line/60 px-4 py-8 md:flex">
+      <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col gap-6 overflow-y-auto border-r border-line px-4 py-8 md:flex">
         <div className="px-3">
-          <Link href="/today" className="font-display text-3xl text-brand">More</Link>
-          <p className="mt-1 text-sm text-ink-3">{householdName}</p>
+          <Link href="/today" className="font-display text-[2.2rem] italic leading-none text-brand">More<span className="text-accent">.</span></Link>
+          <p className="label-caps mt-2 text-ink-3">{householdName}</p>
         </div>
         <nav aria-label="Main" className="flex flex-col gap-5">
           {[primary, secondary].map((group, g) => (
@@ -145,9 +144,9 @@ export function NavBar({ householdName, myName }: { householdName: string; myNam
                   <Link
                     href={p.href}
                     aria-current={active(p.href) ? "page" : undefined}
-                    className={cx("flex items-center gap-3 rounded-xl px-3 py-2 text-[15px] transition-colors", active(p.href) ? "bg-brand-soft font-medium text-brand" : "text-ink-2 hover:bg-surface-2")}
+                    className={cx("flex items-center gap-3 rounded-[10px] border-l-[3px] px-3 py-2 text-[15px] transition-colors", active(p.href) ? "border-accent bg-brand-soft font-medium text-brand" : "border-transparent text-ink-2 hover:bg-surface-2")}
                   >
-                    <p.icon aria-hidden size={18} />
+                    <p.icon aria-hidden size={18} strokeWidth={1.7} />
                     {p.label}
                   </Link>
                 </li>

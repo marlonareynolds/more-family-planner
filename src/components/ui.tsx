@@ -17,7 +17,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLBut
         className={cx(
           "inline-flex select-none items-center justify-center gap-1.5 rounded-full font-medium transition-[background-color,transform,box-shadow] duration-150 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100",
           size === "sm" ? "min-h-9 px-3 text-sm" : "min-h-11 px-4 text-[15px]",
-          variant === "primary" && "bg-brand text-brand-ink shadow-soft hover:brightness-110",
+          variant === "primary" && "bg-brand text-brand-ink shadow-[2px_2px_0_var(--accent)] hover:brightness-110 active:shadow-none",
           variant === "secondary" && "border border-line bg-surface text-ink hover:bg-surface-2",
           variant === "ghost" && "text-ink-2 hover:bg-surface-2",
           variant === "danger" && "border border-bad/40 bg-surface text-bad hover:bg-bad/10",
@@ -49,14 +49,14 @@ export function Field({ label, hint, error, children }: { label: string; hint?: 
 }
 
 export const inputClass =
-  "min-h-11 w-full rounded-xl border border-line bg-surface px-3 text-[15px] text-ink placeholder:text-ink-3 focus:border-brand focus:outline-none";
+  "min-h-11 w-full rounded-[10px] border border-line bg-surface px-3 text-[15px] text-ink placeholder:text-ink-3 focus:border-brand focus:outline-none";
 
 export function Card({ children, className, tone, style }: { children: ReactNode; className?: string; tone?: "me" | "us" | "family" | "care" | "neutral"; style?: React.CSSProperties }) {
   return (
     <div
       style={style}
       className={cx(
-        "rounded-2xl border border-line/70 bg-surface p-4 shadow-soft",
+        "rounded-[14px] border border-line bg-surface p-4 shadow-soft",
         tone === "me" && "border-l-4 border-l-me",
         tone === "us" && "border-l-4 border-l-us",
         tone === "family" && "border-l-4 border-l-family",
@@ -108,12 +108,12 @@ export function Dialog({ open, onClose, title, children, footer }: { open: boole
         e.preventDefault();
         onClose();
       }}
-      className="m-0 mt-auto max-h-[92dvh] w-full max-w-none rounded-t-3xl border border-line bg-surface p-0 text-ink sm:m-auto sm:max-w-lg sm:rounded-3xl"
+      className="m-0 mt-auto max-h-[92dvh] w-full max-w-none rounded-t-[20px] border border-line bg-surface p-0 text-ink sm:m-auto sm:max-w-lg sm:rounded-[18px]"
     >
       {open && (
         <div className="flex max-h-[92dvh] flex-col">
           <div className="flex items-center justify-between border-b border-line px-5 py-4">
-            <h2 id={titleId} className="font-display text-xl">
+            <h2 id={titleId} className="font-display text-[1.35rem] italic">
               {title}
             </h2>
             <button onClick={onClose} className="rounded-full p-2 text-ink-2 hover:bg-surface-2" aria-label="Close">
@@ -129,29 +129,26 @@ export function Dialog({ open, onClose, title, children, footer }: { open: boole
 }
 
 const EMPTY_TONE = {
-  brand: "bg-brand-soft text-brand",
-  me: "bg-me-soft text-me",
-  us: "bg-us-soft text-us",
-  family: "bg-family-soft text-family",
+  brand: "text-brand",
+  me: "text-me",
+  us: "text-us",
+  family: "text-family",
 } as const;
 
 /**
- * A friendly empty state: a small illustration built from an icon, a title,
- * one line of why, and one clear next step. Pass the icon as an element
+ * A friendly empty state: an ink stamp built from an icon, a title, one line
+ * of why, and one clear next step. Pass the icon as an element
  * (`icon={<MapPin />}`) so server pages can use it too.
  */
 export function EmptyState({ title, children, icon, tone = "brand", action }: { title: string; children?: ReactNode; icon?: ReactNode; tone?: keyof typeof EMPTY_TONE; action?: ReactNode }) {
   return (
-    <div className="rise flex flex-col items-center rounded-3xl border border-dashed border-line bg-surface/60 px-6 py-9 text-center">
+    <div className="rise flex flex-col items-center rounded-[14px] border border-dashed border-line bg-surface/70 px-6 py-9 text-center">
       {icon && (
-        <div className="relative mb-4" aria-hidden>
-          <span className={cx("absolute -left-3 top-1 size-2.5 rounded-full opacity-60", EMPTY_TONE[tone])} />
-          <span className={cx("absolute -right-2 -top-1 size-4 rounded-full opacity-50", EMPTY_TONE[tone])} />
-          <span className={cx("absolute -bottom-1 right-[-14px] size-2 rounded-full opacity-70", EMPTY_TONE[tone])} />
-          <div className={cx("pop grid size-16 rotate-[-6deg] place-items-center rounded-[1.4rem] shadow-soft [&_svg]:size-8 [&_svg]:rotate-[6deg]", EMPTY_TONE[tone])}>{icon}</div>
+        <div aria-hidden className={cx("pop mb-4 grid size-[4.5rem] -rotate-6 place-items-center rounded-full border-[1.5px] border-current p-1 [&_svg]:size-7 [&_svg]:stroke-[1.5]", EMPTY_TONE[tone])}>
+          <div className="grid size-full place-items-center rounded-full border border-dashed border-current opacity-90">{icon}</div>
         </div>
       )}
-      <p className="font-display text-xl text-ink">{title}</p>
+      <p className="font-display text-[1.35rem] italic leading-snug text-ink">{title}</p>
       {children && <div className="mt-1.5 max-w-sm text-[15px] leading-relaxed text-ink-2">{children}</div>}
       {action && <div className="mt-5">{action}</div>}
     </div>
@@ -163,7 +160,7 @@ export function ChoiceCard({ name, checked, onChange, children }: { name: string
   return (
     <label
       className={cx(
-        "group relative flex cursor-pointer gap-3 rounded-2xl border bg-surface p-3.5 transition-[border-color,background-color,box-shadow,transform] duration-150 active:scale-[0.99]",
+        "group relative flex cursor-pointer gap-3 rounded-[14px] border bg-surface p-3.5 transition-[border-color,background-color,box-shadow,transform] duration-150 active:scale-[0.99]",
         checked ? "border-brand bg-brand-soft/60 shadow-soft" : "border-line hover:border-ink-3/40",
       )}
     >
@@ -186,7 +183,8 @@ export function SectionTitle({ children, action, hint }: { children: ReactNode; 
   return (
     <div className="mb-3 mt-10">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="font-display text-xl text-ink">{children}</h2>
+        <h2 className="font-display text-[1.45rem] italic leading-tight text-ink">{children}</h2>
+        <span aria-hidden className="h-px flex-1 translate-y-1 bg-line" />
         {action}
       </div>
       {hint && <p className="mt-1 text-sm text-ink-3">{hint}</p>}

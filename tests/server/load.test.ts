@@ -6,6 +6,8 @@ import { processOutbox } from "@/server/outbox";
 import { calendarFeed } from "@/server/queries/calendar-out";
 import { jobsFor } from "@/server/queries/jobs";
 import { picksFor } from "@/server/queries/picks";
+import { DATE_NIGHT_KEY, menuFromNotes, menuToNotes } from "@/lib/date-night";
+import { freeTimesFor } from "@/server/queries/free-time";
 import { expectCode, newWorld, timed } from "./harness";
 
 const notes = async (w: Awaited<ReturnType<typeof newWorld>>, accountId: string) =>
@@ -107,5 +109,24 @@ describe("plans in your own calendar", () => {
     expect(await calendarFeed(w.db, token)).toBeNull();
     expect(await calendarFeed(w.db, fresh)).toContain("BEGIN:VCALENDAR");
     expect(await calendarFeed(w.db, "../../etc")).toBeNull();
+  });
+});
+
+describe("date night concierge", () => {
+  it("sends the menu as an invitation the partner can answer, at a sensible time", async () => {
+    const w = await newWorld();
+    const now = new Date("2030-10-07T08:00:00Z");
+    const free = await freeTimesFor(w.db, w.alex, "us", 210, now, 14, ["18:30", "19:30"]);
+    expect(free.slots.length).toBeGreaterThan(0);
+    expect(free.slots.every((s) => s.startTime >= "18:30" && s.startTime <= "19:30")).toBe(true);
+
+    const menu = { entree: "A drink with a view", plat: "Dinner at Zia's", dessert: "A crêpe on the walk home", note: "Wear the blue." };
+    const s = free.slots[0];
+    const d = await w.run(w.alex, "CreateMoment", { kind: "us", title: "Date night", notes: menuToNotes(menu), activityKey: DATE_NIGHT_KEY, span: timed(s.date, s.startTime, s.endTime), participantIds: [w.alex.accountId, w.sam.accountId], needsCare: true, budgetMinor: 6000 });
+    await w.run(w.alex, "ShareMoment", { momentId: d.momentId, version: d.version });
+    const seen = (await w.week(w.sam, "2030-10-07", now)).moments.find((m) => m.id === d.momentId)!;
+    expect(seen.activityKey).toBe(DATE_NIGHT_KEY);
+    expect(menuFromNotes(seen.notes)).toEqual(menu);
+    await w.run(w.sam, "RespondToMoment", { momentId: d.momentId, materialVersion: seen.materialVersion, decision: "accepted" });
   });
 });

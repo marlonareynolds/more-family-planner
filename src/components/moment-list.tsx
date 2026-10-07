@@ -19,7 +19,7 @@ const EMPTY: Record<MomentKind, { title: string; body: string }> = {
 };
 
 /** Moments of one kind, split by what each adult needs to do next. */
-export function MomentList({ data, kind, title, intro }: { data: WeekView; kind: MomentKind; title: string; intro: string }) {
+export function MomentList({ data, kind, title, intro, lead }: { data: WeekView; kind: MomentKind; title: string; intro: string; lead?: React.ReactNode }) {
   const app = useApp();
   const [creating, setCreating] = useState(false);
   const now = useNow();
@@ -42,6 +42,7 @@ export function MomentList({ data, kind, title, intro }: { data: WeekView; kind:
         </div>
         <Button variant="primary" onClick={() => setCreating(true)}>+ Plan something</Button>
       </div>
+      {lead}
       {waiting.length > 0 && (<><SectionTitle>Waiting for your answer</SectionTitle><ul className="flex flex-col gap-3">{waiting.map(card)}</ul></>)}
       <WeekPicksSection kind={kind} />
       <SectionTitle>Coming up</SectionTitle>
