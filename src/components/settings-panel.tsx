@@ -10,7 +10,7 @@ import { useApp } from "./app-context";
 import { fmtDateTime } from "./format";
 import { Badge, Button, Card, Checkbox, Dialog, ErrorNote, Field, SectionTitle, inputClass } from "./ui";
 import { useCommand } from "./use-command";
-import { CalendarSettings } from "./calendar-settings";
+import { CalendarSettings, type CalendarConnect } from "./calendar-settings";
 
 type Child = WeekView["children"][number];
 const AGE_BANDS = ["0-4", "5-7", "8-11", "12-15", "16+"] as const;
@@ -42,6 +42,7 @@ export function SettingsPanel({
   profile,
   analyticsOptOut,
   calendars,
+  calendarConnect,
   reach,
   helpers,
   calendarOut,
@@ -52,6 +53,7 @@ export function SettingsPanel({
   profile: { displayName: string; timeZone: string };
   analyticsOptOut: boolean;
   calendars: WeekView["calendars"];
+  calendarConnect: CalendarConnect;
   reach: ReachSettings;
   helpers: WeekView["helpers"];
   calendarOut: CalendarOutState | null;
@@ -65,7 +67,7 @@ export function SettingsPanel({
       <Adults openInvite={openInvite} />
       <Children kids={kids} />
       <HelpersSettings helpers={helpers} />
-      <CalendarSettings calendars={calendars} />
+      <CalendarSettings calendars={calendars} connect={calendarConnect} />
       <CalendarOutSettings state={calendarOut} />
       <YourData analyticsOptOut={analyticsOptOut} />
       <Leaving household={household} />

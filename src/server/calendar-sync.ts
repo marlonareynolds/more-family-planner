@@ -1,16 +1,21 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { and, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { calendarFeeds, events, households, memberships } from "@/db/schema";
+import { calendarFeeds, calendarPushes, events, households, memberships } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import { parseIcs, type ImportedOccurrence } from "@/domain/ics";
 import { instantToLocal } from "@/domain/time";
+import { deleteBusy, freshTokens, listBusy, putBusy, ProviderError, ReconnectNeeded, type HttpFetch, type Provider, type Tokens } from "./calendar-providers";
+import { loadBusy } from "./queries/busy";
+import { seal, unseal } from "./secret-box";
 
 /**
- * Read-only calendar import (spec 8.11). A sync fetches the adult's
- * iCalendar link, expands it for a window, and replaces that feed's
- * imported copies in one transaction. Provider events are never changed.
+ * Calendar import (spec 8.11). A sync reads the adult's calendar (an
+ * iCalendar link, or a signed-in Google or Outlook account), expands it for
+ * a window, and replaces that feed's imported copies in one transaction.
+ * Their events are never changed; a signed-in account can also receive
+ * More's own plans as plain "Busy" blocks, which More alone manages.
  * Failures are recorded on the feed and shown to the adult, never hidden.
  */
 
@@ -121,7 +126,10 @@ function rowFor(o: ImportedOccurrence, feed: typeof calendarFeeds.$inferSelect, 
   };
 }
 
-export async function syncFeed(db: Db, feedId: string, fetchText: FetchText = fetchFeed, now = new Date()): Promise<SyncResult> {
+/** How far ahead More writes its plans into a connected calendar. */
+export const WRITE_AHEAD_DAYS = 90;
+
+export async function syncFeed(db: Db, feedId: string, fetchText: FetchText = fetchFeed, now = new Date(), http: HttpFetch = fetch): Promise<SyncResult> {
   const [feed] = await db.select().from(calendarFeeds).where(eq(calendarFeeds.id, feedId));
   if (!feed) return { ok: false, imported: 0, error: "not_found" };
   const [household] = await db.select().from(households).where(eq(households.id, feed.householdId));
@@ -133,10 +141,21 @@ export async function syncFeed(db: Db, feedId: string, fetchText: FetchText = fe
 
   const window = { start: now.getTime() - SYNC_PAST_DAYS * 86_400_000, end: now.getTime() + SYNC_FUTURE_DAYS * 86_400_000 };
   let occurrences: ImportedOccurrence[];
+  let access: { provider: Provider; token: string } | null = null;
   try {
-    occurrences = parseIcs(await fetchText(feed.url), window, household.timeZone);
+    if (feed.provider === "ics") {
+      occurrences = parseIcs(await fetchText(feed.url), window, household.timeZone);
+    } else {
+      if (!feed.credentials) return fail("reconnect");
+      const fresh = await freshTokens(feed.provider, JSON.parse(unseal(feed.credentials)) as Tokens, http, now.getTime());
+      if (fresh.changed) await db.update(calendarFeeds).set({ credentials: seal(JSON.stringify(fresh.tokens)) }).where(eq(calendarFeeds.id, feed.id));
+      access = { provider: feed.provider, token: fresh.tokens.access };
+      occurrences = await listBusy(feed.provider, access.token, window, household.timeZone, http);
+    }
   } catch (err) {
     if (err instanceof SyncError) return fail(err.code);
+    if (err instanceof ReconnectNeeded) return fail("reconnect");
+    if (err instanceof ProviderError) return fail("http_error");
     if (err instanceof DomainError) return fail("not_calendar");
     return fail("unreachable");
   }
@@ -188,22 +207,85 @@ export async function syncFeed(db: Db, feedId: string, fetchText: FetchText = fe
       .where(eq(calendarFeeds.id, feed.id));
     await tx.update(households).set({ scheduleRevision: sql`${households.scheduleRevision} + 1` }).where(eq(households.id, household.id));
   });
+  if (access && feed.writeBusy) {
+    const written = await writeBusy(db, feed, access, now, http).catch((err) => (err instanceof ReconnectNeeded ? "reconnect" : "write_failed"));
+    if (typeof written === "string") {
+      await db.update(calendarFeeds).set({ lastError: written }).where(eq(calendarFeeds.id, feed.id));
+      return { ok: false, imported: occurrences.length, error: written };
+    }
+  }
   return { ok: true, imported: occurrences.length };
 }
 
+/**
+ * Make the connected calendar match what occupies this adult in More: agreed
+ * plans, children they've agreed to look after, and time away. Each is a
+ * plain "Busy" block; details never leave More.
+ */
+export async function writeBusy(db: Db, feed: typeof calendarFeeds.$inferSelect, access: { provider: Provider; token: string }, now = new Date(), http: HttpFetch = fetch): Promise<{ written: number; removed: number }> {
+  const window = { start: now.getTime(), end: now.getTime() + WRITE_AHEAD_DAYS * 86_400_000 };
+  const wanted = new Map<string, { start: number; end: number }>();
+  for (const b of await loadBusy(db, feed.householdId, window)) {
+    if (b.personId !== feed.accountId || b.end <= window.start || b.start >= window.end) continue;
+    if (b.sourceType !== "date" && b.sourceType !== "care" && b.sourceType !== "trip") continue;
+    wanted.set(`${b.sourceType}:${b.sourceId}`, { start: b.start, end: b.end });
+  }
+  const pushed = await db.select().from(calendarPushes).where(eq(calendarPushes.feedId, feed.id));
+  let written = 0;
+  let removed = 0;
+  for (const [sourceKey, block] of wanted) {
+    const fingerprint = `${block.start}-${block.end}`;
+    const prior = pushed.find((x) => x.sourceKey === sourceKey);
+    if (prior?.fingerprint === fingerprint) continue;
+    const externalId = await putBusy(access.provider, access.token, prior?.externalId ?? null, block, http);
+    await db
+      .insert(calendarPushes)
+      .values({ feedId: feed.id, sourceKey, externalId, fingerprint, updatedAt: now })
+      .onConflictDoUpdate({ target: [calendarPushes.feedId, calendarPushes.sourceKey], set: { externalId, fingerprint, updatedAt: now } });
+    written++;
+  }
+  // Plans that ended early, were cancelled or moved out of reach: take the block away.
+  for (const x of pushed.filter((x) => !wanted.has(x.sourceKey))) {
+    await deleteBusy(access.provider, access.token, x.externalId, http);
+    await db.delete(calendarPushes).where(and(eq(calendarPushes.feedId, feed.id), eq(calendarPushes.sourceKey, x.sourceKey)));
+    removed++;
+  }
+  return { written, removed };
+}
+
+/** Before disconnecting: take every block More wrote back out of the calendar. */
+export async function clearPushedBusy(db: Db, feedId: string, http: HttpFetch = fetch, now = new Date()): Promise<void> {
+  const [feed] = await db.select().from(calendarFeeds).where(eq(calendarFeeds.id, feedId));
+  if (!feed || feed.provider === "ics" || !feed.credentials) return;
+  const pushed = await db.select().from(calendarPushes).where(eq(calendarPushes.feedId, feed.id));
+  if (!pushed.length) return;
+  const { tokens } = await freshTokens(feed.provider, JSON.parse(unseal(feed.credentials)) as Tokens, http, now.getTime());
+  for (const x of pushed) {
+    await deleteBusy(feed.provider, tokens.access, x.externalId, http).catch(() => {});
+    await db.delete(calendarPushes).where(and(eq(calendarPushes.feedId, feed.id), eq(calendarPushes.sourceKey, x.sourceKey)));
+  }
+}
+
+interface SyncOpts {
+  accountId?: string;
+  limit?: number;
+  /** Only signed-in accounts, which carry More's plans back out as busy. */
+  connected?: boolean;
+}
+
 /** Feeds that haven't been tried for `olderThanMs`, oldest first. */
-export async function dueFeeds(db: Db, olderThanMs: number, opts: { accountId?: string; limit?: number } = {}, now = new Date()): Promise<string[]> {
+export async function dueFeeds(db: Db, olderThanMs: number, opts: SyncOpts = {}, now = new Date()): Promise<string[]> {
   const cutoff = new Date(now.getTime() - olderThanMs);
   const rows = await db
     .select({ id: calendarFeeds.id })
     .from(calendarFeeds)
-    .where(and(opts.accountId ? eq(calendarFeeds.accountId, opts.accountId) : undefined, or(isNull(calendarFeeds.lastAttemptAt), lt(calendarFeeds.lastAttemptAt, cutoff))))
+    .where(and(opts.accountId ? eq(calendarFeeds.accountId, opts.accountId) : undefined, opts.connected ? ne(calendarFeeds.provider, "ics") : undefined, or(isNull(calendarFeeds.lastAttemptAt), lt(calendarFeeds.lastAttemptAt, cutoff))))
     .orderBy(sql`${calendarFeeds.lastAttemptAt} asc nulls first`)
     .limit(opts.limit ?? 50);
   return rows.map((r) => r.id);
 }
 
-export async function syncDue(db: Db, olderThanMs: number, opts: { accountId?: string; limit?: number } = {}): Promise<{ synced: number; failed: number }> {
+export async function syncDue(db: Db, olderThanMs: number, opts: SyncOpts = {}): Promise<{ synced: number; failed: number }> {
   let synced = 0;
   let failed = 0;
   for (const id of await dueFeeds(db, olderThanMs, opts)) {

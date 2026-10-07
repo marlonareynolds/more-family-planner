@@ -117,7 +117,9 @@ describe("plans in your own calendar", () => {
 
     const { token } = await w.run(w.alex, "CreateCalendarLink", {}, { householdId: undefined });
     const ics = (await calendarFeed(w.db, token, new Date("2030-10-06T12:00:00Z")))!;
-    expect(ics).toContain("SUMMARY:Dinner\\, Italian");
+    // Time for the two of you is discreet where lock screens show it.
+    expect(ics).toContain("SUMMARY:Plans with Sam");
+    expect(ics).toContain("DESCRIPTION:Dinner\\, Italian");
     expect(ics).toContain("LOCATION:Zia's");
     expect(ics).toContain("STATUS:CONFIRMED");
     expect(ics).toContain("SUMMARY:Sam: time for themselves");

@@ -41,7 +41,7 @@ const secondary: Place[] = [
   { href: "/plan", label: "Plan the week", icon: Sparkles, hint: "Ten minutes, once a week" },
   { href: "/jobs", label: "Jobs", icon: ListChecks, hint: "Who does what at home" },
   { href: "/places", label: "Our places", icon: MapPin, hint: "Spots you love nearby" },
-  { href: "/holidays", label: "Holidays and care", icon: Backpack, hint: "School breaks, who has the children" },
+  { href: "/holidays", label: "Trips and care", icon: Backpack, hint: "Time away, school breaks, who has the children" },
   { href: "/look-back", label: "Look back", icon: BookHeart, hint: "Your month in memories" },
   { href: "/trial", label: "Trial", icon: FlaskConical, hint: "Weekly questions" },
   { href: "/settings", label: "Settings", icon: Settings, hint: "People, calendars, notifications" },

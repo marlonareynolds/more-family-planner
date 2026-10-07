@@ -1,6 +1,6 @@
 import { and, count, eq } from "drizzle-orm";
 import { z } from "zod";
-import { calendarFeeds, events } from "@/db/schema";
+import { calendarFeeds, calendarPushes, events } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import { normaliseFeedUrl } from "../calendar-sync";
 import { defineCommand, assertVersion, type CommandContext } from "../pipeline";
@@ -45,10 +45,12 @@ export const addCalendarFeed = defineCommand({
 export const updateCalendarFeed = defineCommand({
   name: "UpdateCalendarFeed",
   scope: "household",
-  payload: z.object({ feedId: z.uuid(), version: z.number().int(), label: requiredText(60, "A name"), visibility }),
+  payload: z.object({ feedId: z.uuid(), version: z.number().int(), label: requiredText(60, "A name"), visibility, writeBusy: z.boolean().optional() }),
   async handler(ctx, p) {
     const feed = await ownFeed(ctx, p.feedId, p.version);
-    await ctx.tx.update(calendarFeeds).set({ label: p.label, visibility: p.visibility, version: feed.version + 1 }).where(eq(calendarFeeds.id, feed.id));
+    // Writing back only works for a signed-in account, not a read-only link.
+    const writeBusy = feed.provider === "ics" ? false : (p.writeBusy ?? feed.writeBusy);
+    await ctx.tx.update(calendarFeeds).set({ label: p.label, visibility: p.visibility, writeBusy, version: feed.version + 1 }).where(eq(calendarFeeds.id, feed.id));
     // Sharing applies to everything already imported, not only future syncs.
     await ctx.tx.update(events).set({ visibility: p.visibility }).where(eq(events.feedId, feed.id));
     await ctx.bumpSchedule();
@@ -57,6 +59,7 @@ export const updateCalendarFeed = defineCommand({
 });
 
 export async function disconnectFeed(ctx: Pick<CommandContext, "tx">, feedId: string): Promise<void> {
+  await ctx.tx.delete(calendarPushes).where(eq(calendarPushes.feedId, feedId));
   await ctx.tx.delete(events).where(eq(events.feedId, feedId));
   await ctx.tx.delete(calendarFeeds).where(eq(calendarFeeds.id, feedId));
 }

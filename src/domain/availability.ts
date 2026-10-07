@@ -7,7 +7,7 @@ import { overlaps, subtract, union, withTravel, type Interval } from "./interval
 
 export type Visibility = "shared" | "busy_only" | "private";
 
-export type SourceType = "event" | "date" | "care" | "handover" | "external";
+export type SourceType = "event" | "date" | "care" | "handover" | "external" | "trip";
 
 /** A span of time that occupies one person. */
 export interface Busy {
@@ -23,6 +23,8 @@ export interface Busy {
   ownerId: string;
   visibility: Visibility;
   title: string;
+  /** Children who come along, for events. */
+  childIds?: readonly string[];
   /** Stale external calendars make availability uncertain (spec 8.11). */
   uncertain?: boolean;
 }

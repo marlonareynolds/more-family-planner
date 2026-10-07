@@ -56,7 +56,7 @@ describe("reaching people outside the app (spec 13.2)", () => {
     await w.db.update(accounts).set({ quietStart: "21:00", quietEnd: "21:00" }).where(eq(accounts.id, w.sam.accountId));
     const stats = await deliverPushes(w.db, winterNight);
     expect(stats.sent).toBe(1);
-    expect(sent.map((s) => s.body)).toEqual(["2 updates. Alex invited you to a plan.", "2 updates. Alex invited you to a plan."]);
+    expect(sent.map((s) => s.body)).toEqual(["2 updates. Alex has planned something for 12 October.", "2 updates. Alex has planned something for 12 October."]);
     // The dead device was dropped; nothing is pushed twice.
     expect((await deliverPushes(w.db, winterNight)).sent).toBe(0);
     await deliverPushes(w.db, winterNight);

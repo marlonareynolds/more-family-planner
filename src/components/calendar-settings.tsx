@@ -5,7 +5,7 @@ import { useState } from "react";
 import type { CalendarView } from "@/server/queries/week";
 import { useApp } from "./app-context";
 import { fmtDateTime } from "./format";
-import { Badge, Button, Card, ErrorNote, Field, SectionTitle, inputClass } from "./ui";
+import { Badge, Button, Card, Checkbox, ErrorNote, Field, SectionTitle, inputClass } from "./ui";
 import { useCommand } from "./use-command";
 
 type Visibility = CalendarView["visibility"];
@@ -22,7 +22,27 @@ const ERRORS: Record<string, string> = {
   not_calendar: "The link didn't return a calendar.",
   too_large: "The calendar is too large to import.",
   blocked_address: "That address can't be used.",
+  reconnect: "More's access has ended. Connect it again to keep it in step.",
+  write_failed: "Your plans couldn't be added to it as busy. More will try again.",
 };
+
+/** The landing note after coming back from Google or Microsoft. */
+const RESULTS: Record<string, string> = {
+  connected: "Connected. Its events now count as your busy time, and your More plans will show in it as “Busy”.",
+  cancelled: "Nothing was connected.",
+  expired: "That took a little long. Please try connecting again.",
+  too_many: "You can connect up to 5 calendars.",
+  unavailable: "That kind of calendar isn't set up yet.",
+  failed: "Connecting didn't work. Please try again.",
+};
+
+const PROVIDER_NAME = { google: "Google Calendar", microsoft: "Outlook" } as const;
+
+export interface CalendarConnect {
+  /** Sign-in options that are set up on this server. */
+  providers: ("google" | "microsoft")[];
+  result: string | null;
+}
 
 async function syncNow(feedId: string): Promise<{ ok: boolean; error?: string; message?: string }> {
   try {
@@ -35,8 +55,23 @@ async function syncNow(feedId: string): Promise<{ ok: boolean; error?: string; m
   }
 }
 
-/** Read-only calendar links (spec 8.11): imported as the owner's busy time. */
-export function CalendarSettings({ calendars }: { calendars: CalendarView[] }) {
+async function disconnect(feedId: string, version: number): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/v1/calendar-feeds/${feedId}/disconnect`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version }) });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) return data?.error?.message ?? "Couldn't disconnect just now.";
+    return data?.cleared === false ? "Disconnected. Some “Busy” blocks may still be in that calendar; you can delete them there." : null;
+  } catch {
+    return "You seem to be offline.";
+  }
+}
+
+/**
+ * Connected calendars (spec 8.11): imported as the owner's busy time. A
+ * signed-in Google or Outlook account can also receive More's plans as
+ * plain "Busy" blocks, so work never books over family time.
+ */
+export function CalendarSettings({ calendars, connect }: { calendars: CalendarView[]; connect: CalendarConnect }) {
   const app = useApp();
   const router = useRouter();
   const { run, pending, error } = useCommand(app.householdId);
@@ -45,9 +80,17 @@ export function CalendarSettings({ calendars }: { calendars: CalendarView[] }) {
   const [url, setUrl] = useState("");
   const [visibility, setVisibility] = useState<Visibility>("busy_only");
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(connect.result ? (RESULTS[connect.result] ?? null) : null);
   const mine = calendars.filter((c) => c.mine);
   const theirs = calendars.filter((c) => !c.mine);
+
+  const drop = async (c: CalendarView) => {
+    if (c.provider === "ics") return run("RemoveCalendarFeed", { feedId: c.id, version: c.version });
+    setBusyId(c.id);
+    setNote(await disconnect(c.id, c.version));
+    setBusyId(null);
+    router.refresh();
+  };
 
   const refresh = async (id: string) => {
     setBusyId(id);
@@ -59,11 +102,21 @@ export function CalendarSettings({ calendars }: { calendars: CalendarView[] }) {
 
   return (
     <section id="calendars">
-      <SectionTitle action={!adding && <Button size="sm" onClick={() => setAdding(true)}>+ Connect a calendar</Button>}>Calendars</SectionTitle>
+      <SectionTitle action={!adding && <Button size="sm" onClick={() => setAdding(true)}>+ Add a calendar link</Button>}>Calendars</SectionTitle>
       <Card className="flex flex-col gap-4">
         <p className="text-sm text-ink-2">
-          Connect your work or personal calendar so its events count as your busy time. More only reads it, refreshes it a few times a day and never changes the original.
+          Connect your work or personal calendar so its events count as your busy time. More never changes your own events.
+          {connect.providers.length > 0 && " Sign in with Google or Outlook and More can also mark its plans there as “Busy”, with no details, so nobody books over them."}
         </p>
+        {connect.providers.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {connect.providers.map((p) => (
+              <a key={p} href={`/api/v1/calendars/connect/${p}`} className="inline-flex min-h-11 items-center rounded-full border border-line bg-surface px-4 text-[15px] font-medium text-ink hover:bg-surface-2">
+                Connect {PROVIDER_NAME[p]}
+              </a>
+            ))}
+          </div>
+        )}
         {mine.length === 0 && !adding && <p className="text-sm text-ink-3">No calendars connected yet.</p>}
         {mine.map((c) => (
           <div key={c.id} className="flex flex-col gap-2 border-t border-line pt-3 first:border-0 first:pt-0">
@@ -82,8 +135,16 @@ export function CalendarSettings({ calendars }: { calendars: CalendarView[] }) {
                 {VISIBILITY.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
               </select>
               <Button size="sm" disabled={busyId === c.id} onClick={() => refresh(c.id)}>{busyId === c.id ? "Updating…" : "Update now"}</Button>
-              <Button size="sm" variant="ghost" disabled={pending} onClick={() => run("RemoveCalendarFeed", { feedId: c.id, version: c.version })}>Disconnect</Button>
+              <Button size="sm" variant="ghost" disabled={pending || busyId === c.id} onClick={() => drop(c)}>Disconnect</Button>
             </div>
+            {c.provider !== "ics" && (
+              <Checkbox
+                checked={c.writeBusy}
+                onChange={(v) => run("UpdateCalendarFeed", { feedId: c.id, version: c.version, label: c.label, visibility: c.visibility, writeBusy: v })}
+                label="Show my More plans here as “Busy”"
+                hint="Agreed plans, children you're looking after and time away, for the next three months. Only the word “Busy”, set to private."
+              />
+            )}
           </div>
         ))}
         {theirs.length > 0 && (

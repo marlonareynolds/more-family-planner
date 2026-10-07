@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { accounts, calendarExports } from "@/db/schema";
+import { plansWith } from "@/domain/discreet";
 import { buildCalendar, type OutEvent } from "@/domain/ics-out";
 import { addDays, instantToLocalDate } from "@/domain/time";
 import type { Actor } from "../auth";
@@ -52,7 +53,12 @@ export async function calendarFeed(db: Db, token: string, now = new Date()): Pro
     const mine = m.participantIds.includes(me) || m.organiserId === me;
     if (!mine && !(m.momentKind === "me" && m.sharing === "shared")) continue;
     const waiting = m.sharing === "shared" && !m.agreed && m.lifecycle === "planned";
+    // Calendars show on lock screens and widgets: time for the two of you is
+    // "Plans with Sam" there, with what it is only inside the event.
+    const discreet = m.momentKind === "us";
+    const partner = view.adults.find((a) => a.id !== me && m.participantIds.includes(a.id))?.displayName;
     const lines = [
+      ...(discreet && !m.detailsHidden ? [m.title] : []),
       ...(m.detailsHidden || !m.notes ? [] : [m.notes]),
       ...(waiting ? ["Waiting for everyone to agree in More."] : []),
       `Open in More: ${base}/week`,
@@ -61,7 +67,7 @@ export async function calendarFeed(db: Db, token: string, now = new Date()): Pro
       uid: `moment-${m.id}@more`,
       start: m.start,
       end: m.end,
-      summary: m.title,
+      summary: discreet ? plansWith(partner) : m.title,
       description: lines.join("\n\n"),
       location: m.detailsHidden ? undefined : m.location || undefined,
       status: waiting ? "TENTATIVE" : "CONFIRMED",

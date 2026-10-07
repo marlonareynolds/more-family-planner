@@ -117,6 +117,8 @@ export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
         </h1>
       </header>
 
+      <AwayLines data={data} />
+
       <section aria-label="Your week at a glance" className="rise mt-6" style={{ ["--i" as string]: 1 }}>
         <div className="shadow-lift relative flex overflow-hidden rounded-[14px] bg-brand text-brand-ink">
           <div className="min-w-0 flex-1 p-5">
@@ -270,5 +272,25 @@ export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
       )}
       {checkin && <CheckinDialog onClose={() => setCheckin(false)} weekKey={mondayOf(today)} />}
     </div>
+  );
+}
+
+/** Time away as plain facts: who is away now, and the family's next trip. */
+function AwayLines({ data }: { data: WeekView }) {
+  const app = useApp();
+  const now = useNow();
+  const today = todayIn(app.timeZone);
+  const away = data.trips.filter((t) => t.start <= now && t.end > now && !t.travellerIds.includes(app.me.id));
+  const trip = data.nextFamilyTrip;
+  const days = trip ? Math.round((Date.parse(`${localParts(trip.start, app.timeZone).date}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000) : 0;
+  if (!away.length && !trip) return null;
+  return (
+    <ul className="rise mt-4 flex flex-col gap-1 text-[15px] text-ink-2" style={{ ["--i" as string]: 1 }}>
+      {away.map((t) => {
+        const back = localParts(t.end, app.timeZone);
+        return <li key={t.id}>{t.travellerIds.map(app.nameOf).join(" and ")} {t.travellerIds.length > 1 ? "are" : "is"} away until {back.date === today ? "" : `${fmtDate(back.date)} `}{back.time}.</li>;
+      })}
+      {trip && days > 0 && <li><span className="font-display text-lg italic text-family">{days} {days === 1 ? "sleep" : "sleeps"}</span> until {trip.title}.</li>}
+    </ul>
   );
 }

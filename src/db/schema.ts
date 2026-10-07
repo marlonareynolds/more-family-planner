@@ -172,7 +172,14 @@ export const calendarFeeds = pgTable(
     householdId: uuid("household_id").notNull().references(() => households.id),
     accountId: uuid("account_id").notNull().references(() => accounts.id),
     label: text("label").notNull(),
+    /** For "ics", the private link; for a connected account, the calendar id. */
     url: text("url").notNull(),
+    /** A pasted iCalendar link, or a connected Google or Microsoft account. */
+    provider: text("provider", { enum: ["ics", "google", "microsoft"] }).notNull().default("ics"),
+    /** Sealed OAuth tokens for a connected account (never sent to a browser). */
+    credentials: text("credentials"),
+    /** Write More's plans back to this calendar as "Busy". */
+    writeBusy: boolean("write_busy").notNull().default(false),
     /** How imported items appear to the partner. */
     visibility: text("visibility", { enum: ["shared", "busy_only", "private"] }).notNull().default("busy_only"),
     lastAttemptAt: ts("last_attempt_at"),
@@ -832,3 +839,49 @@ export const calendarExports = pgTable("calendar_exports", {
   createdAt: created(),
   lastFetchedAt: ts("last_fetched_at"),
 });
+
+// ── Trips and time away ────────────────────────────────────────────────────
+
+/**
+ * Time away from home: a work trip, a weekend with friends, or the whole
+ * family's holiday. One entry does the work: travellers show as away, and
+ * children left at home get care needs wherever no adult is left to cover.
+ * Logistics, so shared with the household.
+ */
+export const trips = pgTable(
+  "trips",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    organiserId: uuid("organiser_id").notNull().references(() => accounts.id),
+    kind: text("kind", { enum: ["work", "personal", "family"] }).notNull(),
+    title: text("title").notNull(),
+    destination: text("destination").notNull().default(""),
+    startAt: ts("start_at").notNull(),
+    endAt: ts("end_at").notNull(),
+    travellerIds: uuid("traveller_ids").array().notNull(),
+    childIds: uuid("child_ids").array().notNull().default(sql`'{}'::uuid[]`),
+    createdAt: created(),
+    cancelledAt: ts("cancelled_at"),
+    version: version(),
+  },
+  (t) => [index("trips_household_time").on(t.householdId, t.startAt)],
+);
+
+/**
+ * "Busy" blocks More has written into a connected calendar, one per plan,
+ * so they can be moved or removed when the plan changes.
+ */
+export const calendarPushes = pgTable(
+  "calendar_pushes",
+  {
+    feedId: uuid("feed_id").notNull().references(() => calendarFeeds.id),
+    /** "moment:<id>" or "trip:<id>". */
+    sourceKey: text("source_key").notNull(),
+    externalId: text("external_id").notNull(),
+    /** Start and end as last written, to skip unchanged blocks. */
+    fingerprint: text("fingerprint").notNull(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.feedId, t.sourceKey] })],
+);

@@ -57,6 +57,13 @@
       "when": 1791369521703,
       "tag": "0007_date_hints",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791371858542,
+      "tag": "0008_trips_calendar_sync",
+      "breakpoints": true
     }
   ]
 }

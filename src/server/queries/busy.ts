@@ -1,6 +1,6 @@
 import { and, eq, gt, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
 import type { DbOrTx } from "@/db/client";
-import { careArrangements, eventExceptions, events, moments, reservations } from "@/db/schema";
+import { careArrangements, eventExceptions, events, moments, reservations, trips } from "@/db/schema";
 import type { Busy } from "@/domain/availability";
 import type { Interval } from "@/domain/intervals";
 import { expand, type SeriesException } from "@/domain/recurrence";
@@ -80,6 +80,7 @@ export async function loadBusy(db: DbOrTx, householdId: string, horizon: Interva
         ownerId: o.row.ownerId,
         visibility: o.row.visibility,
         title: o.row.title,
+        childIds: o.row.childIds,
       });
     }
   }
@@ -110,5 +111,29 @@ export async function loadBusy(db: DbOrTx, householdId: string, horizon: Interva
       title: isMoment ? (m?.title ?? "Plan") : "Looking after the children",
     });
   }
+  // Time away: each traveller is away for the whole trip.
+  for (const t of await loadTrips(db, householdId, horizon)) {
+    for (const personId of t.travellerIds) {
+      busy.push({
+        personId,
+        start: t.startAt.getTime(),
+        end: t.endAt.getTime(),
+        sourceType: "trip",
+        sourceId: t.id,
+        ownerId: t.organiserId,
+        visibility: "shared",
+        title: `Away: ${t.title}`,
+      });
+    }
+  }
   return busy;
+}
+
+/** Trips overlapping a horizon (with a day's margin either side). */
+export async function loadTrips(db: DbOrTx, householdId: string, horizon: Interval) {
+  return db
+    .select()
+    .from(trips)
+    .where(and(eq(trips.householdId, householdId), isNull(trips.cancelledAt), lt(trips.startAt, new Date(horizon.end + 86_400_000)), gt(trips.endAt, new Date(horizon.start - 86_400_000))))
+    .orderBy(trips.startAt);
 }
