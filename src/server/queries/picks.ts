@@ -5,13 +5,14 @@ import { DomainError } from "@/domain/errors";
 import type { SuggestedTime } from "@/domain/free-time";
 import { choosePicks, pairSlots, slotMinutes } from "@/domain/picks";
 import { currentWeekKey } from "@/domain/time";
-import { matchActivities, type Activity, type AgeBand } from "@/lib/catalogue";
+import { catalogueSeat, matchActivities, type Activity, type AgeBand } from "@/lib/catalogue";
 import { placeActivities } from "@/lib/places";
 import { myShare } from "@/lib/private-split";
 import type { Actor } from "../auth";
 import { freeTimesFor, heavyWeek } from "./free-time";
 import { guidanceFor } from "./learning";
 import { placesFor } from "./places";
+import { usShelf } from "./shelf";
 import { householdFor } from "./week";
 
 export interface WeekPick {
@@ -20,7 +21,7 @@ export interface WeekPick {
   simpler: boolean;
   slot: SuggestedTime | null;
   /** Who could look after the children, when they'd need it. */
-  carer: { kind: "partner" | "helper" | "none" | "not_needed"; name: string | null; helperId: string | null };
+  carer: { kind: "arranged" | "pending" | "partner" | "helper" | "none" | "not_needed"; name: string | null; helperId: string | null };
 }
 
 export interface WeekPicks {
@@ -64,8 +65,9 @@ export async function picksFor(
   // For Us ideas are private to each partner: each adult only ever sees their
   // own half, so neither is shown what the other was. Places and the general
   // catalogue are dealt separately so each keeps its shelf.
-  const shelf = { householdId: household.id, accountId: actor.accountId, adultIds: adults.map((a) => a.id) };
-  const share = <T extends { key: string }>(list: T[]) => (kind === "us" ? myShare(list, (a) => a.key, shelf) : list);
+  // Ideas a partner has already used stay theirs (R07).
+  const shelf = kind === "us" ? await usShelf(db, household.id, actor.accountId, adults.map((a) => a.id)) : null;
+  const share = <T extends { key: string }>(list: T[]) => (shelf ? myShare(list, (a) => a.key, shelf, (a) => catalogueSeat(a.key)) : list);
   const candidates = [...share(own), ...share(general)].filter((a) => slotMinutes(a) !== null);
   const week = currentWeekKey(household.timeZone, now.getTime());
   const seed = kind === "us" ? `${household.id}:${actor.accountId}:${week}` : `${household.id}:${week}`;
@@ -90,6 +92,8 @@ export async function picksFor(
       const care = slot?.care;
       const carer: WeekPick["carer"] =
         !kids.length || care === "with_family" || care === "no_children" ? { kind: "not_needed", name: null, helperId: null }
+        : care === "arranged" ? { kind: "arranged", name: null, helperId: null }
+        : care === "pending" ? { kind: "pending", name: null, helperId: null }
         : care === "partner_free" ? { kind: "partner", name: partner?.displayName ?? null, helperId: null }
         : firstHelper ? { kind: "helper", name: firstHelper.name, helperId: firstHelper.id }
         : { kind: "none", name: null, helperId: null };

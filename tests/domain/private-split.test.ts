@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CATALOGUE } from "@/lib/catalogue";
+import { CATALOGUE, catalogueSeat } from "@/lib/catalogue";
 import { composeMenu, courseOptions, type Budget, type Course, type Mood } from "@/lib/date-night";
 import { myShare } from "@/lib/private-split";
 
@@ -9,14 +9,14 @@ const shelf = (accountId: string, householdId = "h1") => ({ householdId, account
 describe("For Us shelves: each partner has their own ideas", () => {
   it("deals every item to exactly one adult, half each, stable across calls", () => {
     const items = CATALOGUE.filter((a) => a.kind === "us").map((a) => a.key);
-    const alex = myShare(items, (k) => k, shelf("a-alex"));
-    const sam = myShare(items, (k) => k, shelf("b-sam"));
+    const alex = myShare(items, (k) => k, shelf("a-alex"), catalogueSeat);
+    const sam = myShare(items, (k) => k, shelf("b-sam"), catalogueSeat);
     expect(alex.filter((k) => sam.includes(k))).toEqual([]);
     expect([...alex, ...sam].sort()).toEqual([...items].sort());
     expect(Math.abs(alex.length - sam.length)).toBeLessThanOrEqual(1);
-    expect(myShare(items, (k) => k, shelf("a-alex"))).toEqual(alex);
-    // Another household is dealt differently.
-    expect(myShare(items, (k) => k, shelf("a-alex", "h2"))).not.toEqual(alex);
+    expect(myShare(items, (k) => k, shelf("a-alex"), catalogueSeat)).toEqual(alex);
+    // Some other household is dealt the other way round.
+    expect(["h2", "h3", "h4", "h5"].some((h) => JSON.stringify(myShare(items, (k) => k, shelf("a-alex", h), catalogueSeat)) !== JSON.stringify(alex))).toBe(true);
   });
 
   it("gives a single adult everything", () => {
@@ -51,5 +51,45 @@ describe("For Us shelves: each partner has their own ideas", () => {
     expect(a.entree).not.toBe(s.entree);
     expect(a.plat).not.toBe(s.plat);
     expect(a.dessert).not.toBe(s.dessert);
+  });
+});
+
+describe("R07 private shelves stay put (BR-12)", () => {
+  const keys = CATALOGUE.filter((a) => a.kind === "us").map((a) => a.key);
+  const owners = (items: string[], s: (id: string) => ReturnType<typeof shelf>) => {
+    const alex = new Set(myShare(items, (k) => k, s("a-alex")));
+    return new Map(items.map((k) => [k, alex.has(k) ? "a-alex" : "b-sam"]));
+  };
+
+  it("adding or removing ideas never moves an existing idea to the other shelf", () => {
+    const before = owners(keys, (id) => shelf(id));
+    for (const added of [["aaa-new"], ["zzz-new"], ["mid-new", "another-new", "third-new"]]) {
+      const after = owners([...keys, ...added], (id) => shelf(id));
+      expect(keys.filter((k) => after.get(k) !== before.get(k))).toEqual([]);
+    }
+    for (const removed of keys.slice(0, 4)) {
+      const after = owners(keys.filter((k) => k !== removed), (id) => shelf(id));
+      expect(keys.filter((k) => k !== removed && after.get(k) !== before.get(k))).toEqual([]);
+    }
+  });
+
+  it("when a partner changes, ideas the staying adult has already used stay theirs", () => {
+    const used = keys.slice(0, 6);
+    const stayer = (id: string) => ({ householdId: "h1", accountId: id, adultIds: ["a-alex", "c-new"], claimed: Object.fromEntries(used.map((k) => [k, "a-alex"])) });
+    const alex = myShare(keys, (k) => k, stayer("a-alex"));
+    const newcomer = myShare(keys, (k) => k, stayer("c-new"));
+    expect(used.every((k) => alex.includes(k))).toBe(true);
+    expect(used.some((k) => newcomer.includes(k))).toBe(false);
+    expect(alex.filter((k) => newcomer.includes(k))).toEqual([]);
+  });
+
+  it("an idea one partner has used is never on the other's shelf", () => {
+    const claimed = { [keys[0]]: "b-sam", [keys[1]]: "a-alex" };
+    const alex = myShare(keys, (k) => k, { ...shelf("a-alex"), claimed });
+    const sam = myShare(keys, (k) => k, { ...shelf("b-sam"), claimed });
+    expect(sam).toContain(keys[0]);
+    expect(alex).not.toContain(keys[0]);
+    expect(alex).toContain(keys[1]);
+    expect(sam).not.toContain(keys[1]);
   });
 });

@@ -242,7 +242,7 @@ function FreeTogether({ at }: { at: { startTime: string; care: string } }) {
     <Link href="/us/date-night" className="inline-flex items-center gap-1 rounded-full px-1 text-us underline-offset-2 hover:underline">
       <Heart aria-hidden size={13} />
       Evening free for you and {app.partner?.displayName ?? "your partner"} from {at.startTime}
-      {at.care === "needs_care" ? ", children need someone" : ""}
+      {at.care === "needs_care" ? ", children need someone" : at.care === "partly_arranged" ? ", care arranged for part of it" : at.care === "arranged" ? ", care arranged" : ""}
     </Link>
   );
 }

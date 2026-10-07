@@ -224,7 +224,7 @@ export const reservations = pgTable(
     id: id(),
     householdId: uuid("household_id").notNull().references(() => households.id),
     accountId: uuid("account_id").notNull().references(() => accounts.id),
-    sourceType: text("source_type", { enum: ["moment", "care"] }).notNull(),
+    sourceType: text("source_type", { enum: ["moment", "care", "drop_off", "collect"] }).notNull(),
     sourceId: uuid("source_id").notNull(),
     startAt: ts("start_at").notNull(),
     endAt: ts("end_at").notNull(),
@@ -431,6 +431,15 @@ export const careArrangements = pgTable(
     confirmedAt: ts("confirmed_at"),
     createdBy: uuid("created_by").notNull().references(() => accounts.id),
     note: text("note").notNull().default(""),
+    /** A partner asked to take this over from the named parent (R08); confirming it retires the original. */
+    replacesId: uuid("replaces_id").references((): AnyPgColumn => careArrangements.id),
+    /** Named handovers: who takes the children there and who collects them, once they've agreed. */
+    dropOffBy: uuid("drop_off_by").references(() => accounts.id),
+    dropOffAgreed: boolean("drop_off_agreed").notNull().default(false),
+    collectBy: uuid("collect_by").references(() => accounts.id),
+    collectAgreed: boolean("collect_agreed").notNull().default(false),
+    /** Travel each way for a handover, reserved around the start and the end. */
+    handoverMinutes: smallint("handover_minutes").notNull().default(20),
     createdAt: created(),
     version: version(),
   },

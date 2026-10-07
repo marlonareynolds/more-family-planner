@@ -99,6 +99,20 @@ export async function loadBusy(db: DbOrTx, householdId: string, horizon: Interva
     );
   for (const { r, m } of res) {
     const isMoment = r.sourceType === "moment";
+    if (r.sourceType === "drop_off" || r.sourceType === "collect") {
+      // A named handover: the journey to take or collect the children.
+      busy.push({
+        personId: r.accountId,
+        start: r.startAt.getTime(),
+        end: r.endAt.getTime(),
+        sourceType: "handover",
+        sourceId: r.sourceId,
+        ownerId: r.accountId,
+        visibility: "shared",
+        title: r.sourceType === "drop_off" ? "Drop-off" : "Collection",
+      });
+      continue;
+    }
     busy.push({
       personId: r.accountId,
       start: r.startAt.getTime(),

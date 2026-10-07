@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useState } from "react";
 import { CATALOGUE, matchActivities, type Activity, type AgeBand, type Setting } from "@/lib/catalogue";
 import { placeActivities } from "@/lib/places";
-import { myShare } from "@/lib/private-split";
 import type { SuggestedTime } from "@/domain/free-time";
 import { useApp } from "./app-context";
 import { endDateOf } from "./week-picks";
@@ -52,9 +51,10 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
     setPlanning(a);
   }
   const bands = [...new Set(app.children.map((c) => c.ageBand as AgeBand))];
-  // For Us ideas are private: each partner has their own half (as in picks).
-  const shelf = { householdId: app.householdId, accountId: app.me.id, adultIds: app.adults.map((a) => a.id) };
-  const share = (list: Activity[]) => myShare(list, (a) => a.key, shelf);
+  // For Us ideas are private: the server deals my shelf (as in picks), so
+  // ideas my partner has used never reach this page.
+  const mine = app.usShelf ? new Set(app.usShelf) : null;
+  const share = (list: Activity[]) => (mine ? list.filter((a) => mine.has(a.key)) : list);
 
   // The household's own places first, then the general starter ideas.
   const matches = matchActivities({

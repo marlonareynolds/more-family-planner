@@ -163,8 +163,9 @@ export interface PlaceOption {
  * offered what the other was.
  */
 export function courseOptions(course: Course, mood: Mood, budget: Budget, places: PlaceOption[] = [], shelf?: Shelf): { text: string; location?: string }[] {
-  const share = <T>(items: readonly T[], keyOf: (t: T) => string) => (shelf ? myShare(items, keyOf, shelf) : [...items]);
-  const texts = (list: string[]) => share(list, (t) => t).map((text) => ({ text }));
+  const share = <T>(items: readonly T[], keyOf: (t: T) => string, seatOf?: (t: T) => number) => (shelf ? myShare(items, keyOf, shelf, seatOf) : [...items]);
+  // Course lists only grow at the end, so a line's position is its seat.
+  const texts = (list: string[]) => share(list, (t) => t, (t) => list.indexOf(t)).map((text) => ({ text }));
   if (course === "entree") return texts(ENTREE[mood]);
   if (course === "dessert") return texts(DESSERT[mood]);
   // The household's own places for the two of you come first when going out.

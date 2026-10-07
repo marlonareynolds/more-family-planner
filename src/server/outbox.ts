@@ -58,7 +58,12 @@ export async function stillRelevant(db: Db, p: NotifyPayload, now: Date): Promis
   }
   if (p.sourceType === "care") {
     const [c] = await db.select().from(careArrangements).where(eq(careArrangements.id, p.sourceId));
-    return !!c && c.state === "proposed" && c.version === p.sourceVersion;
+    if (!c) return false;
+    // A handover ask is worth sending only while it still waits for them.
+    if (p.kind === "care.handover_asked") return c.version === p.sourceVersion && ((c.dropOffBy === p.recipientId && !c.dropOffAgreed) || (c.collectBy === p.recipientId && !c.collectAgreed));
+    // News about a change (withdrawn, taken over, a handover dropped): still true unless it changed again.
+    if (p.kind !== "care.asked") return c.version === p.sourceVersion;
+    return c.state === "proposed" && c.version === p.sourceVersion;
   }
   if (p.sourceType === "job") return jobStillRelevant(db, p);
   if (p.sourceType === "event" && p.kind === "event.leave") return leaveStillRelevant(db, p, now);

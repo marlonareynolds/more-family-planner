@@ -9,7 +9,9 @@ import { Badge, Button, Card, SectionTitle } from "./ui";
 
 export function careLine(p: WeekPick, kind: MomentKind, partnerName: string | null): string {
   if (p.carer.kind === "not_needed") return kind === "family" ? "Everyone's free" : kind === "us" ? "You're both free" : "You're free";
-  if (p.carer.kind === "partner") return `${p.carer.name ?? partnerName ?? "Your partner"} is free for the children`;
+  if (p.carer.kind === "arranged") return "Care for the children is already arranged";
+  if (p.carer.kind === "pending") return "Care is asked for, waiting for a yes";
+  if (p.carer.kind === "partner") return `${p.carer.name ?? partnerName ?? "Your partner"} could have the children`;
   if (p.carer.kind === "helper") return `The children need looking after. Ask ${p.carer.name}?`;
   return "The children will need looking after";
 }

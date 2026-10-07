@@ -149,3 +149,11 @@ export function matchActivities(f: CatalogueFilter, list: readonly Activity[] = 
     return true;
   });
 }
+
+const SEATS = new Map<string, number>();
+for (const kind of ["me", "us", "family"] as const) CATALOGUE.filter((a) => a.kind === kind).forEach((a, i) => SEATS.set(a.key, i));
+
+/** An idea's fixed position among ideas of its kind (append-only: see private-split). */
+export function catalogueSeat(key: string): number | undefined {
+  return SEATS.get(key);
+}
