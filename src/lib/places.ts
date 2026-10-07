@@ -13,6 +13,8 @@ export interface PlaceView {
   durationMinutes: number;
   stepFree: boolean;
   calm: boolean;
+  /** Where to book it, if the household saved one. */
+  bookingUrl: string;
   version: number;
 }
 

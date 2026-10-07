@@ -64,7 +64,18 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   const link = await alex.getByLabel("Invitation link").inputValue();
   expect(link).toMatch(/\/join\//);
 
-  await expect(alex.getByText("Robin")).toBeVisible();
+  await expect(alex.getByText("Robin", { exact: true })).toBeVisible();
+
+  // A kitchen display: a no-account screen with family logistics only
+  await alex.getByRole("button", { name: "Kitchen display" }).click();
+  const screen = await alex.getByLabel(/Kitchen display: open this on that device/).inputValue();
+  expect(screen).toMatch(/\/display\//);
+  const kitchenContext = await browser.newContext({ viewport: vp });
+  const kitchen = await kitchenContext.newPage();
+  await kitchen.goto(screen);
+  await expect(kitchen.getByRole("heading", { name: "Today" })).toBeVisible();
+  await axe(kitchen);
+  await kitchenContext.close();
 
   // Sam joins
   const sam = await adult(browser, `Sam ${tag}`, vp);

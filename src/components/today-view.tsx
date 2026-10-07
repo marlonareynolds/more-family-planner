@@ -11,6 +11,10 @@ import { CheckinDialog } from "./checkin-dialog";
 import { fmtDate, localParts, mondayOf, todayIn } from "./format";
 import { JobsToday } from "./jobs";
 import { MomentCard } from "./moment-card";
+import { MomentEditor } from "./moment-editor";
+import { WeatherLine, WetPlanCard } from "./weather";
+import { CATALOGUE } from "@/lib/catalogue";
+import { placeKey } from "@/lib/places";
 import { RitualCard } from "./rituals";
 import { toast } from "./toast";
 import { WeekBoard } from "./week-board";
@@ -117,6 +121,7 @@ export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
         </h1>
       </header>
 
+      <div className="rise mt-3" style={{ ["--i" as string]: 1 }}><WeatherLine w={data.weather[today]} /></div>
       <AwayLines data={data} />
 
       <section aria-label="Your week at a glance" className="rise mt-6" style={{ ["--i" as string]: 1 }}>
@@ -213,6 +218,17 @@ export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
         <ul className="flex flex-col gap-3">
           {needsMe.map((a) => {
             const m = momentFor(a.targetId);
+            if (a.action === "weather") {
+              const plan = data.wetPlans.find((w) => w.momentId === a.targetId);
+              return plan && m ? <li key={a.key}><WetPlanCard plan={plan} moment={m} /></li> : null;
+            }
+            if (a.action === "wish") {
+              const wish = data.wishes.find((w) => w.id === a.targetId);
+              return wish ? <li key={a.key}><WishCard wish={wish} /></li> : null;
+            }
+            if (m && a.action === "me-clash") {
+              return <li key={a.key}><p className="mb-1 text-sm text-ink-2">{a.text} Only you see this.</p><MomentCard moment={m} /></li>;
+            }
             if (m && (a.action === "respond" || a.action === "review" || a.action === "complete" || a.action === "reflect")) {
               return <li key={a.key}><MomentCard moment={m} expense={data.expenses.find((x) => x.id === m.expenseId)} /></li>;
             }
@@ -272,6 +288,34 @@ export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
       )}
       {checkin && <CheckinDialog onClose={() => setCheckin(false)} weekKey={mondayOf(today)} />}
     </div>
+  );
+}
+
+/** A child's pick from their own screen: plan it, or put it aside kindly. */
+function WishCard({ wish }: { wish: WeekView["wishes"][number] }) {
+  const app = useApp();
+  const { run, pending } = useCommand(app.householdId);
+  const [planning, setPlanning] = useState(false);
+  const name = app.childName(wish.childId);
+  const idea = wish.activityKey.startsWith("place:") ? null : CATALOGUE.find((x) => x.key === wish.activityKey);
+  const place = wish.activityKey.startsWith("place:") ? app.places.find((p) => placeKey(p.id) === wish.activityKey) : null;
+  return (
+    <Card tone="family">
+      <p className="font-medium">{name} picked “{wish.title}”</p>
+      <p className="text-sm text-ink-2">It was {name}&apos;s turn to choose. Find a time for it, or let {name} know it&apos;ll be another week.</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" variant="primary" onClick={() => setPlanning(true)}>Plan it</Button>
+        <Button size="sm" variant="ghost" disabled={pending} onClick={() => run("SetWishAside", { wishId: wish.id })}>Not this time</Button>
+      </div>
+      {planning && (
+        <MomentEditor
+          open
+          onClose={() => setPlanning(false)}
+          defaultDate={todayIn(app.timeZone)}
+          template={{ kind: "family", title: wish.title, activityKey: wish.activityKey, durationMinutes: idea?.durationMinutes ?? place?.durationMinutes ?? 120, location: place ? [place.name, place.area].filter(Boolean).join(", ") : undefined, chosenByChildId: wish.childId }}
+        />
+      )}
+    </Card>
   );
 }
 

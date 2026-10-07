@@ -64,6 +64,13 @@
       "when": 1791371858542,
       "tag": "0008_trips_calendar_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791374093254,
+      "tag": "0009_screens_weather_booking",
+      "breakpoints": true
     }
   ]
 }

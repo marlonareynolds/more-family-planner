@@ -13,6 +13,7 @@ import {
   type SeriesDefinition,
 } from "@/domain/recurrence";
 import { defineCommand, assertVersion, type CommandContext } from "../pipeline";
+import { assertOwnTimeRespected } from "./me-guard";
 import { assertPeople, resolveSpan, shortText, spanSchema, requiredText, type ResolvedSpan } from "./helpers";
 
 /**
@@ -91,6 +92,13 @@ function rowValues(ctx: CommandContext, f: EventFields) {
   };
 }
 
+/** The times an event will take, for the next few months, to check against others' own time. */
+function spansOf(ctx: CommandContext, v: ReturnType<typeof rowValues>) {
+  if (!v.rule) return [{ start: v.startAt.getTime(), end: v.endAt.getTime() }];
+  const def: SeriesDefinition = { localStart: v.localStart, timeZone: v.timeZone, allDay: v.allDay, durationMinutes: v.durationMinutes, rule: v.rule as RecurrenceRule };
+  return expand(def, { start: ctx.now.getTime(), end: ctx.now.getTime() + 120 * 86_400_000 });
+}
+
 async function loadEvent(ctx: CommandContext, eventId: string): Promise<EventRow> {
   const [row] = await ctx.tx.select().from(events).where(and(eq(events.id, eventId), eq(events.householdId, ctx.household.id)));
   if (!row || row.cancelledAt) throw new DomainError("NOT_FOUND", "That event could not be found.");
@@ -108,9 +116,11 @@ export const addEvent = defineCommand({
   payload: eventFields,
   async handler(ctx, p) {
     await assertPeople(ctx, p.adultIds, p.childIds);
+    const values = rowValues(ctx, p);
+    await assertOwnTimeRespected(ctx, p.adultIds, spansOf(ctx, values));
     const [row] = await ctx.tx
       .insert(events)
-      .values({ householdId: ctx.household.id, ownerId: ctx.actor.accountId, ...rowValues(ctx, p) })
+      .values({ householdId: ctx.household.id, ownerId: ctx.actor.accountId, ...values })
       .returning({ id: events.id, version: events.version });
     await ctx.bumpSchedule();
     await ctx.audit("event.add", "event", row.id);
@@ -135,6 +145,8 @@ export const updateEvent = defineCommand({
     assertVersion(row, p.version, "This event");
     await assertPeople(ctx, p.fields.adultIds, p.fields.childIds);
     const values = rowValues(ctx, p.fields);
+    // Only people newly added need asking; anyone already in it agreed before.
+    await assertOwnTimeRespected(ctx, p.fields.adultIds.filter((id) => !row.adultIds.includes(id) || values.startAt.getTime() !== row.startAt.getTime() || values.endAt.getTime() !== row.endAt.getTime()), spansOf(ctx, values));
     if (row.visibility !== "shared" || p.fields.visibility !== "shared") {
       if (row.ownerId !== ctx.actor.accountId) throw new DomainError("NOT_FOUND", "That event could not be found.");
     }

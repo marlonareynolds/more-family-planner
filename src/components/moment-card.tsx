@@ -6,6 +6,7 @@ import { useApp, useNow } from "./app-context";
 import { fmtDateTime, fmtMoney, fmtRange, fmtTime, localParts, minorToInput, toMinor } from "./format";
 import { DATE_NIGHT_KEY, menuFromNotes } from "@/lib/date-night";
 import { AskHelperDialog } from "./ask-helper";
+import { BookingLinks } from "./booking-links";
 import { MenuCard } from "./date-night";
 import { MomentEditor } from "./moment-editor";
 import { PlaceEditor } from "./places";
@@ -76,6 +77,9 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
               {m.location && <p>📍 {m.location}</p>}
               {m.notes && <p className="whitespace-pre-line">{m.notes}</p>}
             </>
+          )}
+          {m.lifecycle === "planned" && !past && iAmIn && !m.detailsHidden && (
+            <BookingLinks activityKey={m.activityKey} start={m.start} people={m.participantIds.length + m.childIds.length} />
           )}
           {(m.travelBeforeMinutes > 0 || m.travelAfterMinutes > 0) && (
             <p>Travel: {m.travelBeforeMinutes} min before, {m.travelAfterMinutes} min after</p>

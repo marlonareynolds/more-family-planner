@@ -1,6 +1,6 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { acceptances, expenses, feedback, highlights, moments, preparationTasks, weekPlans } from "@/db/schema";
+import { acceptances, childWishes, expenses, feedback, highlights, moments, preparationTasks, weekPlans } from "@/db/schema";
 import { findConflicts } from "@/domain/availability";
 import { plansWith, whenPhrase } from "@/domain/discreet";
 import { DomainError } from "@/domain/errors";
@@ -168,6 +168,10 @@ export const createMoment = defineCommand({
         chosenByChildId: p.kind === "family" ? p.chosenByChildId : null,
       })
       .returning();
+    // A child's pick from their own screen is answered by planning it.
+    if (m.chosenByChildId) {
+      await ctx.tx.update(childWishes).set({ handledAt: ctx.now }).where(and(eq(childWishes.childId, m.chosenByChildId), isNull(childWishes.handledAt)));
+    }
     await ctx.audit("moment.create", "moment", m.id);
     const [{ n }] = await ctx.tx.select({ n: sql<number>`count(*)::int` }).from(moments).where(eq(moments.householdId, ctx.household.id));
     if (n === 1) await ctx.track("first_plan_created", p.kind);
@@ -265,6 +269,52 @@ export const editMoment = defineCommand({
       await ctx.bumpSchedule();
     }
     return { momentId: m.id, version: updated.version, materialVersion: updated.materialVersion, materialChanges: material };
+  },
+});
+
+/**
+ * Swap what a plan is, keeping its time, people and care: the wet-weather
+ * swap. Not a material change, so nobody has to agree again; the others are
+ * told what it changed to.
+ */
+export const swapActivity = defineCommand({
+  name: "SwapActivity",
+  scope: "household",
+  payload: z.object({
+    momentId: z.uuid(),
+    version: z.number().int(),
+    title: requiredText(120, "A title"),
+    activityKey: z.string().max(80).nullable(),
+    location: shortText(200).default(""),
+    reason: z.enum(["weather"]).default("weather"),
+  }),
+  async handler(ctx, p) {
+    const m = await loadMoment(ctx, p.momentId);
+    assertVersion(m, p.version, "This plan");
+    if (m.kind === "us") throw new DomainError("VALIDATION", "Plans for the two of you are changed by whoever made them.");
+    if (m.lifecycle !== "planned" && m.lifecycle !== "draft") throw new DomainError("CONFLICT", "Finished plans cannot be changed.");
+    if (!m.participantIds.includes(ctx.actor.accountId)) throw new DomainError("NOT_FOUND", "That plan could not be found.");
+    const [updated] = await ctx.tx
+      .update(moments)
+      .set({ title: p.title, activityKey: p.activityKey, location: p.location, version: sql`${moments.version} + 1` })
+      .where(eq(moments.id, m.id))
+      .returning();
+    if (updated.sharing === "shared" && updated.kind === "family") {
+      for (const other of updated.participantIds.filter((id) => id !== ctx.actor.accountId)) {
+        await queueNotification(ctx, {
+          recipientId: other,
+          kind: "moment.swapped",
+          text: `${ctx.actor.displayName} swapped ${m.title} for ${p.title}, as rain is likely.`,
+          sourceType: "moment",
+          sourceId: m.id,
+          sourceVersion: updated.materialVersion,
+        });
+      }
+    }
+    await ctx.bumpSchedule();
+    await ctx.audit("moment.swap", "moment", m.id);
+    await ctx.track("weather_swap", m.kind);
+    return { momentId: m.id, version: updated.version };
   },
 });
 

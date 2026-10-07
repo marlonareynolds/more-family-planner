@@ -18,6 +18,7 @@ export async function placesFor(db: DbOrTx, householdId: string): Promise<PlaceV
     durationMinutes: p.durationMinutes,
     stepFree: p.stepFree,
     calm: p.calm,
+    bookingUrl: p.bookingUrl,
     version: p.version,
   }));
 }

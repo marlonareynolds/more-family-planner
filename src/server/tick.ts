@@ -5,6 +5,8 @@ import { sendWeeklyDigests } from "./reach/digest";
 import { deliverPushes } from "./reach/push";
 import { queueJobReminders } from "./jobs";
 import { topUpRituals } from "./rituals";
+import { notifyMeClashes } from "./me-time";
+import { queueWeatherSwaps, refreshForecasts } from "./weather";
 
 /**
  * Everything time-driven, in one place: called by the scheduled tick (every
@@ -14,13 +16,16 @@ import { topUpRituals } from "./rituals";
 export async function runTick(db: Db, now = new Date()) {
   const rituals = await topUpRituals(db, now).catch((e) => ({ error: String(e) }));
   const jobs = await queueJobReminders(db, now).catch((e) => ({ error: String(e) }));
+  const weather = await refreshForecasts(db, now).catch((e) => ({ error: String(e) }));
+  const swaps = await queueWeatherSwaps(db, now).catch((e) => ({ error: String(e) }));
+  const meTime = await notifyMeClashes(db, now).catch((e) => ({ error: String(e) }));
   const outbox = await processOutbox(db, now);
   const push = await deliverPushes(db, now);
   const email = await sendWeeklyDigests(db, now);
   // Signed-in calendars go round every tick so new plans show as busy promptly.
   const connected = await syncDue(db, 14 * 60_000, { limit: 40, connected: true });
   const calendars = await syncDue(db, 6 * 3_600_000, { limit: 40 });
-  return { rituals, jobs, outbox, push, email, calendars, connected };
+  return { rituals, jobs, weather, swaps, meTime, outbox, push, email, calendars, connected };
 }
 
 /** After someone changes something: deliver what that made due, quickly. */
