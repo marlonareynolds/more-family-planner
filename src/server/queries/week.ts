@@ -91,6 +91,10 @@ export interface CalendarView {
   lastError: string | null;
   eventCount: number;
   stale: boolean;
+  /** "ics" for a read-only link; a provider for a signed-in, two-way account. */
+  provider: "ics" | "google" | "microsoft";
+  /** More's plans are written back to it as "Busy". Owner only. */
+  writeBusy: boolean;
 }
 
 export interface MomentView {
@@ -316,6 +320,8 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
       lastError: mine ? f.lastError : null,
       eventCount: mine ? f.eventCount : 0,
       stale: !f.lastSuccessAt || now.getTime() - f.lastSuccessAt.getTime() > STALE_AFTER_MS,
+      provider: f.provider,
+      writeBusy: mine && f.writeBusy,
     };
   });
   const eventsOut: WeekEvent[] = [];

@@ -1,5 +1,5 @@
 {
-  "id": "3e10d554-e901-4de7-902d-27fb1c3da96f",
+  "id": "c25fd316-5c22-4ab9-9cb3-3a0d99a159d3",
   "prevId": "be156475-acec-4bb3-9d37-e62e59ab3c87",
   "version": "7",
   "dialect": "postgresql",
@@ -399,6 +399,26 @@
           "primaryKey": false,
           "notNull": true
         },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ics'"
+        },
+        "credentials": {
+          "name": "credentials",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "write_busy": {
+          "name": "write_busy",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "visibility": {
           "name": "visibility",
           "type": "text",
@@ -507,6 +527,72 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.calendar_pushes": {
+      "name": "calendar_pushes",
+      "schema": "",
+      "columns": {
+        "feed_id": {
+          "name": "feed_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_key": {
+          "name": "source_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fingerprint": {
+          "name": "fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "calendar_pushes_feed_id_calendar_feeds_id_fk": {
+          "name": "calendar_pushes_feed_id_calendar_feeds_id_fk",
+          "tableFrom": "calendar_pushes",
+          "tableTo": "calendar_feeds",
+          "columnsFrom": [
+            "feed_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "calendar_pushes_feed_id_source_key_pk": {
+          "name": "calendar_pushes_feed_id_source_key_pk",
+          "columns": [
+            "feed_id",
+            "source_key"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
