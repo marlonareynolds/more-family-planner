@@ -54,6 +54,7 @@ export const updateReachSettings = defineCommand({
     weeklyEmail: z.boolean(),
     quietStart: timeString,
     quietEnd: timeString,
+    dateHints: z.boolean().optional(),
   }),
   async handler(ctx, p) {
     await ctx.tx.update(accounts).set(p).where(eq(accounts.id, ctx.actor.accountId));

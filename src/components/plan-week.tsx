@@ -12,24 +12,24 @@ import { Badge, Button, Card, Checkbox, ChoiceCard, EmptyState, ErrorNote, Secti
 import { useCommand } from "./use-command";
 import { careLine, costLine, endDateOf } from "./week-picks";
 
-type Kind = "me" | "us" | "family";
+type Kind = "me" | "family";
 const HEADINGS: Record<Kind, { title: string; hint: string }> = {
   me: { title: "Time for you", hint: "One protected slot. Rest counts." },
-  us: { title: "Time for the two of you", hint: "One thing together, with the children sorted." },
   family: { title: "Family time", hint: "One thing everyone can enjoy." },
 };
 
 /**
  * The Sunday ten minutes: see the week, pick one thing of each kind (each
- * already matched to a free time), and send it all in one go.
+ * already matched to a free time), and send it all in one go. Time for the
+ * two of you is deliberately not on the list: the plan only says, as a
+ * fact, which evenings are free for you both.
  */
-export function PlanWeekFlow({ week, picks }: { week: WeekView; picks: Partial<Record<Kind, WeekPicks>> }) {
+export function PlanWeekFlow({ week, picks, freeEvenings = [] }: { week: WeekView; picks: Partial<Record<Kind, WeekPicks>>; freeEvenings?: string[] }) {
   const app = useApp();
   const { run, pending, error } = useCommand(app.householdId);
   const kinds = (Object.keys(picks) as Kind[]).filter((k) => picks[k]!.picks.some((p) => p.slot));
   const [choice, setChoice] = useState<Record<Kind, number | null>>(() => ({
     me: picks.me?.picks.findIndex((p) => p.slot) ?? null,
-    us: picks.us?.picks.findIndex((p) => p.slot) ?? null,
     family: picks.family?.picks.findIndex((p) => p.slot) ?? null,
   }));
   const [askPartner, setAskPartner] = useState(true);
@@ -71,7 +71,7 @@ export function PlanWeekFlow({ week, picks }: { week: WeekView; picks: Partial<R
   }
 
   if (sent) {
-    const needHelp = sent.filter((s) => s.kind === "us" && (s.pick.carer.kind === "helper" || s.pick.carer.kind === "none"));
+    const needHelp = sent.filter((s) => s.kind === "me" && (s.pick.carer.kind === "helper" || s.pick.carer.kind === "none"));
     return (
       <div className="max-w-2xl">
         <h1 className="font-display text-3xl">That&apos;s the week</h1>
@@ -125,6 +125,7 @@ export function PlanWeekFlow({ week, picks }: { week: WeekView; picks: Partial<R
         ) : (
           app.children.length > 0 && <p className="text-sm text-good">No childcare gaps this week.</p>
         )}
+        {partner && freeEvenings.length > 0 && <p className="text-sm text-ink-2">Free for you and {partner.displayName}: {freeEvenings.map((d) => fmtDate(d)).join(", ")}, in the evening.</p>}
         {week.rituals.filter((r) => r.active).length > 0 && <p className="text-sm text-ink-2">Rituals: {week.rituals.filter((r) => r.active).map((r) => r.title).join(", ")}.</p>}
       </Card>
 

@@ -16,7 +16,8 @@ export default async function UsPage() {
     <AppProvider value={infoFrom(view)}>
       <MomentList data={view} kind="us" title="For Us" intro="Time for the two of you that fits the week: agreed together, childcare sorted, spending clear." lead={<DateNightTeaser key="date-night" />} />
       <details className="mt-8 rounded-[14px] border border-line bg-surface p-4">
-        <summary className="cursor-pointer font-display text-xl italic">All ideas</summary>
+        <summary className="cursor-pointer font-display text-xl italic">Your ideas</summary>
+        {view.adults.length > 1 && <p className="mt-2 text-sm text-ink-3">Only you see these. {view.adults.find((a) => a.id !== view.me.id)?.displayName ?? "Your partner"} has a different set, so whatever you send comes from you.</p>}
         <Ideas kind="us" guidance={guidance.effective} lighterWeek={await heavyWeek(db, actor, view.household.timeZone)} />
       </details>
     </AppProvider>

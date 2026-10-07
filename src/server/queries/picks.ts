@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, ne } from "drizzle-orm";
+import { and, eq, gt, isNull, ne, or } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { accounts, children, helpers, memberships, moments } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
@@ -7,6 +7,7 @@ import { choosePicks, pairSlots, slotMinutes } from "@/domain/picks";
 import { currentWeekKey } from "@/domain/time";
 import { matchActivities, type Activity, type AgeBand } from "@/lib/catalogue";
 import { placeActivities } from "@/lib/places";
+import { myShare } from "@/lib/private-split";
 import type { Actor } from "../auth";
 import { freeTimesFor, heavyWeek } from "./free-time";
 import { guidanceFor } from "./learning";
@@ -53,13 +54,22 @@ export async function picksFor(
   const recentRows = await db
     .select({ key: moments.activityKey })
     .from(moments)
-    .where(and(eq(moments.householdId, household.id), eq(moments.kind, kind), gt(moments.startAt, new Date(now.getTime() - 28 * 86_400_000)), ne(moments.lifecycle, "cancelled")));
+    // Only plans this viewer can see: a partner's private draft changes nothing here.
+    .where(and(eq(moments.householdId, household.id), eq(moments.kind, kind), gt(moments.startAt, new Date(now.getTime() - 28 * 86_400_000)), ne(moments.lifecycle, "cancelled"), or(eq(moments.organiserId, actor.accountId), eq(moments.sharing, "shared"))));
   const recent = new Set(recentRows.map((r) => r.key).filter((k): k is string => !!k));
 
   // The household's own places come first; the general catalogue fills in.
   const own = placeActivities(await placesFor(db, household.id), kind);
-  const candidates = [...own, ...matchActivities({ kind, childAgeBands: [...new Set(kids.map((k) => k.ageBand as AgeBand))] })].filter((a) => slotMinutes(a) !== null);
-  const chosen = choosePicks({ candidates, guidance, recent, lighterWeek, seed: `${household.id}:${currentWeekKey(household.timeZone, now.getTime())}`, count });
+  const general = matchActivities({ kind, childAgeBands: [...new Set(kids.map((k) => k.ageBand as AgeBand))] });
+  // For Us ideas are private to each partner: each adult only ever sees their
+  // own half, so neither is shown what the other was. Places and the general
+  // catalogue are dealt separately so each keeps its shelf.
+  const shelf = { householdId: household.id, accountId: actor.accountId, adultIds: adults.map((a) => a.id) };
+  const share = <T extends { key: string }>(list: T[]) => (kind === "us" ? myShare(list, (a) => a.key, shelf) : list);
+  const candidates = [...share(own), ...share(general)].filter((a) => slotMinutes(a) !== null);
+  const week = currentWeekKey(household.timeZone, now.getTime());
+  const seed = kind === "us" ? `${household.id}:${actor.accountId}:${week}` : `${household.id}:${week}`;
+  const chosen = choosePicks({ candidates, guidance, recent, lighterWeek, seed, count });
 
   // One free-time search per length and time of day, shared between picks.
   const cache = new Map<string, Awaited<ReturnType<typeof freeTimesFor>>>();

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { CATALOGUE, matchActivities, type Activity, type AgeBand, type Setting } from "@/lib/catalogue";
 import { placeActivities } from "@/lib/places";
+import { myShare } from "@/lib/private-split";
 import type { SuggestedTime } from "@/domain/free-time";
 import { useApp } from "./app-context";
 import { endDateOf } from "./week-picks";
@@ -51,6 +52,9 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
     setPlanning(a);
   }
   const bands = [...new Set(app.children.map((c) => c.ageBand as AgeBand))];
+  // For Us ideas are private: each partner has their own half (as in picks).
+  const shelf = { householdId: app.householdId, accountId: app.me.id, adultIds: app.adults.map((a) => a.id) };
+  const share = (list: Activity[]) => myShare(list, (a) => a.key, shelf);
 
   // The household's own places first, then the general starter ideas.
   const matches = matchActivities({
@@ -63,7 +67,7 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
     calm,
     stepFree,
     maxMinutes: maxMinutes === "any" ? null : Number(maxMinutes),
-  }, [...placeActivities(app.places, kind), ...CATALOGUE]);
+  }, kind === "us" ? [...share(placeActivities(app.places, kind)), ...share(CATALOGUE.filter((a) => a.kind === "us"))] : [...placeActivities(app.places, kind), ...CATALOGUE]);
   const avoided = matches.filter((a) => guidance[a.key]?.guidance === "avoid");
   const shown = showHidden ? matches : matches.filter((a) => guidance[a.key]?.guidance !== "avoid");
 

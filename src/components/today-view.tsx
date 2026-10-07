@@ -99,7 +99,7 @@ export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
   const has = (action: string) => data.attention.some((a) => a.action === action);
   const others = [
     ...(!data.checkinDone ? [{ label: "Quick private check-in", hint: "Two questions, just for you", icon: MessageCircleHeart, tone: "bg-me-soft text-me", onClick: () => setCheckin(true) }] : []),
-    ...(has("date-ahead") ? [{ label: "Plan something together", hint: "Nothing for the two of you yet", icon: Heart, tone: "bg-us-soft text-us", href: "/us" }] : []),
+    ...(has("date-ahead") ? [{ label: "A date coming up", hint: "Only you get this reminder", icon: Heart, tone: "bg-us-soft text-us", href: "/us" }] : []),
     ...(has("calendar") ? [{ label: "Check calendars", hint: "A calendar needs a look", icon: RefreshCw, tone: "bg-surface-2 text-ink-2", href: "/settings#calendars" }] : []),
     ...(has("invite") && doneSteps === steps.length ? [{ label: "Invite your partner", hint: "Share the week with them", icon: UserPlus, tone: "bg-brand-soft text-brand", href: "/settings" }] : []),
   ] as { label: string; hint: string; icon: typeof Heart; tone: string; href?: string; onClick?: () => void }[];
