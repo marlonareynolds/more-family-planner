@@ -254,7 +254,7 @@ export async function verifyRestore(db: Db, backup: Backup): Promise<Check[]> {
   const leakedCols = await count(
     db,
     sql`select count(*) as c from information_schema.columns where table_schema = 'public' and column_name = 'household_id'
-        and table_name in ('journal_entries', 'checkins', 'feedback', 'preferences', 'suppressions', 'trial_responses')`,
+        and table_name in ('journal_entries', 'checkins', 'feedback', 'preferences', 'suppressions', 'trial_responses', 'partner_needs', 'need_notes', 'kindness_marks')`,
   );
   add("Private ownership", leakedCols === 0, leakedCols ? "A private table carries a household id" : "Journal, check-ins, feedback and preferences belong to accounts only");
 

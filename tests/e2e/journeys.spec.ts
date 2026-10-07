@@ -32,6 +32,8 @@ async function adult(browser: Browser, name: string, viewport?: { width: number;
 }
 
 async function axe(page: Page) {
+  // Let opening sheets and toasts finish fading in: half-faded text reads as low contrast.
+  await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished.catch(() => {}))));
   const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
   const serious = r.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
   expect(serious.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).slice(0, 3).join(", ")}`)).toEqual([]);
@@ -101,7 +103,7 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   await go(alex, "/us");
   await axe(alex);
   await alex.getByRole("button", { name: "+ Plan something" }).click();
-  await alex.getByLabel("What").fill("Dinner at the Italian");
+  await alex.getByLabel("What", { exact: true }).fill("Dinner at the Italian");
   await alex.getByLabel("Date").fill(inDays(3));
   await alex.getByRole("button", { name: "Save as draft" }).click();
   await expect(alex.getByText("Dinner at the Italian")).toBeVisible();
@@ -230,4 +232,47 @@ test("an adult leaves the household from Settings", async ({ browser }, info) =>
   await alex.getByRole("button", { name: "Leave household" }).click();
   await alex.getByRole("dialog").getByRole("button", { name: "Leave", exact: true }).click();
   await alex.waitForURL(/\/setup/);
+});
+
+test("what would help stays private, and the partner gets small kindnesses", async ({ browser }, info) => {
+  const tag = `${info.project.name}-${Date.now().toString(36)}`;
+  const vp = info.project.name === "phone" ? { width: 412, height: 915 } : undefined;
+  const alex = await adult(browser, `Alex ${tag}`, vp);
+  await alex.getByLabel("Household name").fill(`Household ${tag}`);
+  await alex.getByRole("button", { name: "Start our household" }).click();
+  await alex.waitForURL(/\/welcome/);
+  await go(alex, "/settings");
+  await alex.getByRole("button", { name: "Invite your partner" }).click();
+  const link = await alex.getByLabel("Invitation link").inputValue();
+  const sam = await adult(browser, `Sam ${tag}`, vp);
+  await go(sam, new URL(link).pathname);
+  await sam.getByRole("button", { name: /join/i }).click();
+  await sam.waitForURL(/\/welcome/);
+
+  // Alex says, privately, what would help
+  await go(alex, "/us");
+  await alex.getByText("What would help you").click();
+  await expect(alex.getByText("Only you will ever see this.")).toBeVisible();
+  await alex.getByRole("checkbox", { name: /To feel noticed and appreciated/ }).check();
+  await alex.getByRole("textbox", { name: /In your own words/ }).fill(`Secret wish ${tag}`);
+  await axe(alex);
+  await alex.getByRole("button", { name: "Save, just for me" }).click();
+  await expect(alex.getByText("Saved, just for you.").first()).toBeVisible();
+  await go(alex, "/us");
+  await alex.getByText("What would help you").click();
+  await expect(alex.getByRole("checkbox", { name: /To feel noticed and appreciated/ })).toBeChecked();
+  await expect(alex.getByRole("textbox", { name: /In your own words/ })).toHaveValue(`Secret wish ${tag}`);
+  await alex.screenshot({ path: `test-results/what-would-help-${info.project.name}.png`, fullPage: true });
+
+  // Sam gets a kindness card, and nothing of what Alex said
+  await go(sam, "/us");
+  await expect(sam.getByRole("heading", { name: "A small kindness this week" })).toBeVisible();
+  await expect(sam.getByText(`Secret wish ${tag}`)).toHaveCount(0);
+  expect(await sam.content()).not.toContain(`Secret wish ${tag}`);
+  await sam.getByText("What would help you").click();
+  await expect(sam.getByRole("checkbox", { name: /To feel noticed and appreciated/ })).not.toBeChecked();
+  await axe(sam);
+  await sam.getByRole("button", { name: "I did this" }).first().click();
+  await expect(sam.getByRole("button", { name: "Done" })).toBeVisible();
+  await sam.screenshot({ path: `test-results/kindness-${info.project.name}.png`, fullPage: true });
 });

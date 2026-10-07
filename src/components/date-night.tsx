@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { SuggestedTime } from "@/domain/free-time";
 import { placeKey } from "@/lib/places";
 import { BookingLinks } from "./booking-links";
-import { BUDGETS, COURSE_HINT, COURSE_LABEL, DATE_NIGHT_KEY, MOODS, MOOD_MINUTES, composeMenu, menuToNotes, startWindow, type Budget, type Course, type Menu, type Mood, type Timing } from "@/lib/date-night";
+import { BUDGETS, COURSE_HINT, COURSE_LABEL, DATE_NIGHT_KEY, MOODS, MOOD_MINUTES, composeMenu, menuToNotes, startWindow, type Budget, type Course, type Menu, type MenuStarts, type Mood, type Timing } from "@/lib/date-night";
 import type { FreeTimes } from "@/server/queries/free-time";
 import { useApp } from "./app-context";
 import { fmtDate, mondayOf, todayIn } from "./format";
@@ -101,7 +101,7 @@ export function MenuCard({ menu, when, from, onChange, onShuffle, compact = fals
 }
 
 /** Rule-based and free: compose an evening, then send it as an invitation. */
-export function DateNightConcierge() {
+export function DateNightConcierge({ starts }: { starts?: MenuStarts }) {
   const app = useApp();
   const router = useRouter();
   const { run, pending, error } = useCommand(app.householdId);
@@ -120,8 +120,8 @@ export function DateNightConcierge() {
   const shelf = useMemo(() => ({ householdId: app.householdId, accountId: app.me.id, adultIds: app.adults.map((a) => a.id) }), [app.householdId, app.me.id, app.adults]);
 
   const composed = useMemo(
-    () => (mood ? composeMenu({ mood, budget, seed, turns, places: app.places, shelf }) : null),
-    [mood, budget, seed, turns, app.places, shelf],
+    () => (mood ? composeMenu({ mood, budget, seed, turns, places: app.places, shelf, starts }) : null),
+    [mood, budget, seed, turns, app.places, shelf, starts],
   );
   const menu: Menu | null = composed ? { ...composed, ...edits } : null;
 

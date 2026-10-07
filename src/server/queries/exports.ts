@@ -16,6 +16,7 @@ import {
   highlights,
   holidayPeriods,
   journalEntries,
+  kindnessMarks,
   moments,
   paymentTransactions,
   preferences,
@@ -23,6 +24,7 @@ import {
 } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import type { Actor } from "../auth";
+import { myNeeds } from "./needs";
 import { householdFor } from "./week";
 
 /**
@@ -59,6 +61,9 @@ export async function exportAccount(db: Db, actor: Actor) {
     trialResponses: await db.select().from(trialResponses).where(eq(trialResponses.accountId, actor.accountId)),
     reflections: await db.select().from(feedback).where(eq(feedback.accountId, actor.accountId)),
     preferences: await db.select().from(preferences).where(eq(preferences.accountId, actor.accountId)),
+    // Only your own: what you said would help, and the kindnesses you marked.
+    whatWouldHelp: await myNeeds(db, actor.accountId, []).then((m) => ({ needs: m.needs.map(({ need, shapes }) => ({ need, shapes })), note: m.note })),
+    kindnesses: await db.select({ weekKey: kindnessMarks.weekKey, kindness: kindnessMarks.kindnessKey, mark: kindnessMarks.mark }).from(kindnessMarks).where(eq(kindnessMarks.accountId, actor.accountId)),
   };
 }
 
