@@ -1,7 +1,7 @@
 import { getDb } from "@/db/client";
 import { DomainError } from "@/domain/errors";
 import { requireActor } from "@/server/auth";
-import { deskInput, readWithAi } from "@/server/desk-ai";
+import { deskAiEnabled, deskInput, readWithAi } from "@/server/desk-ai";
 import { assertSameOrigin, errorResponse, noStore } from "@/server/http";
 import { assertRate } from "@/server/rate-limit";
 
@@ -20,4 +20,9 @@ export async function POST(req: Request) {
   } catch (err) {
     return errorResponse(err);
   }
+}
+
+/** Whether the AI reader is switched on here. Says nothing about the key itself. */
+export function GET() {
+  return Response.json({ ai: deskAiEnabled() }, { headers: noStore });
 }
