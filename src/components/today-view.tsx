@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { JobsView } from "@/server/queries/jobs";
-import type { MomentView, WeekView } from "@/server/queries/week";
+import type { WeekView } from "@/server/queries/week";
 import { useApp, useNow } from "./app-context";
 import { CheckinDialog } from "./checkin-dialog";
 import { fmtDate, localParts, mondayOf, todayIn } from "./format";
@@ -13,6 +13,8 @@ import { JobsToday } from "./jobs";
 import { MomentCard } from "./moment-card";
 import { MomentEditor } from "./moment-editor";
 import { WeatherLine, WetPlanCard } from "./weather";
+import { nextUp } from "@/domain/next-up";
+import { AppBadge, QuietNow } from "./quiet-phone";
 import { CATALOGUE } from "@/lib/catalogue";
 import { placeKey } from "@/lib/places";
 import { RitualCard } from "./rituals";
@@ -46,11 +48,11 @@ function isoWeek(date: string): number {
   return Math.ceil(((t.getTime() - yearStart) / 86_400_000 + 1) / 7);
 }
 
-const stubDay = (m: MomentView, tz: string) => Number(localParts(m.start, tz).date.slice(8, 10));
-const stubMonth = (m: MomentView, tz: string) => LONG_MONTHS[Number(localParts(m.start, tz).date.slice(5, 7)) - 1].slice(0, 3);
+const stubDay = (m: { start: number }, tz: string) => Number(localParts(m.start, tz).date.slice(8, 10));
+const stubMonth = (m: { start: number }, tz: string) => LONG_MONTHS[Number(localParts(m.start, tz).date.slice(5, 7)) - 1].slice(0, 3);
 
 /** "Tonight", "Tomorrow at 19:30", "Friday at 10:00", "Sat 18 Oct". */
-function whenLabel(m: MomentView, today: string, tz: string): string {
+function whenLabel(m: { start: number }, today: string, tz: string): string {
   const { date, time } = localParts(m.start, tz);
   const days = Math.round((Date.parse(`${date}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000);
   const hour = Number(time.slice(0, 2));
@@ -87,7 +89,8 @@ export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
   const ahead = data.moments.filter((m) => m.lifecycle === "planned" && m.end > now && m.start < weekEnd);
   const agreed = ahead.filter((m) => m.agreed && (m.participantIds.includes(app.me.id) || m.momentKind === "family"));
   const meHours = Math.round((agreed.filter((m) => m.momentKind === "me" && m.organiserId === app.me.id).reduce((s, m) => s + (m.end - m.start), 0) / 3_600_000) * 2) / 2;
-  const next = [...agreed].sort((a, b) => a.start - b.start)[0];
+  // Up next: the next agreed plan, or a pickup or club you're down for, whichever is sooner.
+  const next = nextUp({ me: app.me.id, now, moments: agreed, events: data.events });
   const jobsDue = jobs?.jobs.filter((j) => (j.status === "today" || j.status === "overdue") && j.ownerId === app.me.id).length ?? 0;
 
   const steps = [
@@ -122,6 +125,7 @@ export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
       </header>
 
       <div className="rise mt-3" style={{ ["--i" as string]: 1 }}><WeatherLine w={data.weather[today]} /></div>
+      <AppBadge count={unread.length} />
       <AwayLines data={data} />
 
       <section aria-label="Your week at a glance" className="rise mt-6" style={{ ["--i" as string]: 1 }}>
@@ -131,7 +135,14 @@ export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
             {next ? (
               <Link href="/week" className="group mt-2 block">
                 <p className="font-display text-[1.75rem] italic leading-tight">{next.title}</p>
-                <p className="mt-1 flex items-center gap-1 opacity-85">{whenLabel(next, today, app.timeZone)} <ArrowRight aria-hidden size={16} className="transition-transform group-hover:translate-x-0.5" /></p>
+                <p className="mt-1 flex items-center gap-1 opacity-85">{next.start <= now ? `On now, until ${localParts(next.end, app.timeZone).time}` : whenLabel(next, today, app.timeZone)} <ArrowRight aria-hidden size={16} className="transition-transform group-hover:translate-x-0.5" /></p>
+                {(next.leaveBy || next.kind === "duty") && (
+                  <p className="mt-1 text-sm opacity-85">
+                    {next.leaveBy ? `Leave by ${localParts(next.leaveBy, app.timeZone).time}` : ""}
+                    {next.leaveBy && next.kind === "duty" ? " · you're" : next.kind === "duty" ? "You're" : ""}
+                    {next.kind === "duty" ? ` on this with ${next.childIds.map(app.childName).join(" and ")}` : ""}
+                  </p>
+                )}
               </Link>
             ) : (
               <div className="mt-2">
@@ -163,6 +174,8 @@ export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
           <div className="px-2 py-3"><dt className="label-caps text-ink-3">Jobs due</dt><dd className="mt-0.5 font-display text-[1.7rem] leading-none">{jobsDue}</dd></div>
         </dl>
       </section>
+
+      <QuietNow moments={agreed.filter((m) => m.momentKind === "me" && m.organiserId === app.me.id)} />
 
       {doneSteps < steps.length && (
         <Card className="rise mt-5" style={{ ["--i" as string]: 2 }}>

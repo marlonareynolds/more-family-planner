@@ -3,6 +3,7 @@ import type { Db } from "@/db/client";
 import { acceptances, careArrangements, memberships, moments, notifications, outbox, preparationTasks } from "@/db/schema";
 import { isAgreed } from "@/domain/moments";
 import { jobStillRelevant } from "./jobs";
+import { leaveStillRelevant } from "./leave-by";
 
 /**
  * Drains the transactional outbox (spec 10.1, 13.2). Processing is
@@ -20,9 +21,11 @@ interface NotifyPayload {
   sourceId: string;
   sourceVersion: number;
   householdId: string;
+  /** For a leave-by reminder: which occurrence of a repeating event. */
+  occurrenceStart?: number;
 }
 
-async function stillRelevant(db: Db, p: NotifyPayload): Promise<boolean> {
+async function stillRelevant(db: Db, p: NotifyPayload, now: Date): Promise<boolean> {
   const [member] = await db
     .select({ id: memberships.id })
     .from(memberships)
@@ -56,6 +59,7 @@ async function stillRelevant(db: Db, p: NotifyPayload): Promise<boolean> {
     return !!c && c.state === "proposed" && c.version === p.sourceVersion;
   }
   if (p.sourceType === "job") return jobStillRelevant(db, p);
+  if (p.sourceType === "event" && p.kind === "event.leave") return leaveStillRelevant(db, p, now);
   if (p.sourceType === "task") {
     const [t] = await db.select().from(preparationTasks).where(eq(preparationTasks.id, p.sourceId));
     return !!t && t.state === "open" && t.ownerId === p.recipientId;
@@ -78,7 +82,7 @@ export async function processOutbox(db: Db, now = new Date(), limit = 50): Promi
       try {
         if (job.eventType === "notify") {
           const p = job.payload as NotifyPayload;
-          if (await stillRelevant(tx as unknown as Db, p)) {
+          if (await stillRelevant(tx as unknown as Db, p, now)) {
             await tx
               .insert(notifications)
               .values({

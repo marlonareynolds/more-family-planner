@@ -8,6 +8,8 @@ self.addEventListener("push", (event) => {
   try {
     data = { ...data, ...event.data.json() };
   } catch {}
+  // The dot on the home-screen icon; the app clears it once read.
+  if (self.navigator.setAppBadge) self.navigator.setAppBadge().catch(() => {});
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
