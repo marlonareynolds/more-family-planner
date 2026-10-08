@@ -87,3 +87,70 @@ export const JOB_STARTERS: { title: string; cadence: JobCadence; minutes: number
   { title: "Birthday presents and cards coming up", cadence: "monthly", minutes: 30, remindDayBefore: false, hint: "Early in the month" },
   { title: "Check the calendar for the month ahead", cadence: "monthly", minutes: 20, remindDayBefore: false, hint: "The last weekend" },
 ];
+
+/** The most jobs a household tracks at once. */
+export const ACTIVE_JOB_LIMIT = 60;
+
+export interface ActiveJobInput extends JobRule {
+  forType: string | null;
+  archivedAt: Date | null;
+}
+
+/**
+ * Whether a job still takes one of the household's sixty places. Repeating
+ * jobs always do until removed. A one-off stops counting once it's done,
+ * and a dinner's job once its evening has passed, so a family planning
+ * dinners every week never fills the list; both stay as history.
+ */
+export function isActiveJob(j: ActiveJobInput, today: string, done: ReadonlySet<string>): boolean {
+  if (j.archivedAt) return false;
+  if (j.cadence !== "once") return true;
+  if (done.has(j.startsOn)) return false;
+  if (j.forType === "dinner" && j.startsOn < today) return false;
+  return true;
+}
+
+export interface JobTemplate {
+  key: string;
+  title: string;
+  cadence: JobCadence;
+  minutes: number;
+  remindDayBefore: boolean;
+  hint: string;
+  steps: string[];
+}
+
+/**
+ * A few responsibilities whose work is more than one moment. Every step can
+ * be removed or reworded; the owner keeps the checklist, and nobody else is
+ * told about ticks.
+ */
+export const JOB_TEMPLATES: JobTemplate[] = [
+  {
+    key: "football",
+    title: "Football",
+    cadence: "weekly",
+    minutes: 30,
+    remindDayBefore: true,
+    hint: "The day of training or the match",
+    steps: ["Check the time and place", "Sort out a lift (drop-off and collection stay on Childcare)", "Wash and pack the kit", "Pass on any changes"],
+  },
+  {
+    key: "party",
+    title: "Birthday party",
+    cadence: "once",
+    minutes: 60,
+    remindDayBefore: true,
+    hint: "The day of the party",
+    steps: ["Reply to the invitation", "Buy a present and card", "Wrap it and write the card", "Sort out a lift"],
+  },
+  {
+    key: "deadline",
+    title: "School deadline",
+    cadence: "once",
+    minutes: 20,
+    remindDayBefore: true,
+    hint: "The day it's due",
+    steps: ["Read the letter", "Fill in the form", "Pay, if there's a payment", "Hand it in or send it back"],
+  },
+];

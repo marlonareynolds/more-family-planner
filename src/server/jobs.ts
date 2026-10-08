@@ -60,7 +60,10 @@ export async function queueJobReminders(db: Db, now = new Date()): Promise<{ que
 /** Is a job notification still true at delivery time? */
 export async function jobStillRelevant(db: Db, p: { kind: string; sourceId: string; sourceVersion: number; recipientId: string }): Promise<boolean> {
   const [j] = await db.select().from(jobs).where(eq(jobs.id, p.sourceId));
-  if (!j || j.archivedAt) return false;
+  if (!j) return false;
+  // "It's off your list" is about the job being retired, so it still holds.
+  if (p.kind === "job.retired" && j.archivedAt) return j.version === p.sourceVersion;
+  if (j.archivedAt) return false;
   if (p.kind === "job.proposed") return j.proposedOwnerId === p.recipientId && j.version === p.sourceVersion;
   if (p.kind === "job.due") {
     if (j.ownerId !== p.recipientId) return false;

@@ -12,6 +12,9 @@ import {
   feedback,
   helpers,
   jobs,
+  meals,
+  dinners,
+  shoppingItems,
   places,
   highlights,
   holidayPeriods,
@@ -140,6 +143,9 @@ export async function exportHousehold(db: Db, actor: Actor) {
       .select({ title: jobs.title, notes: jobs.notes, cadence: jobs.cadence, startsOn: jobs.startsOn, ownerId: jobs.ownerId })
       .from(jobs)
       .where(and(eq(jobs.householdId, household.id), isNull(jobs.archivedAt))),
+    meals: await db.select({ name: meals.name, ingredients: meals.ingredients, quick: meals.quick }).from(meals).where(and(eq(meals.householdId, household.id), isNull(meals.archivedAt))),
+    dinners: await db.select({ date: dinners.date, choice: dinners.choice, note: dinners.note }).from(dinners).where(eq(dinners.householdId, household.id)),
+    shopping: await db.select({ name: shoppingItems.name, got: shoppingItems.gotAt }).from(shoppingItems).where(and(eq(shoppingItems.householdId, household.id), isNull(shoppingItems.clearedAt))),
     places: await db
       .select({ name: places.name, area: places.area, kinds: places.kinds, notes: places.notes, typicalCostMinor: places.typicalCostMinor })
       .from(places)

@@ -808,9 +808,14 @@ export const jobs = pgTable(
     remindDayBefore: boolean("remind_day_before").notNull().default(false),
     /** For a one-off with a precise cut-off ("by 12 noon"): HH:MM local, or null for any time that day. */
     dueTime: text("due_time"),
-    /** The diary item this job is for (a trip's payment, a consent form). */
-    forType: text("for_type", { enum: ["event", "trip"] }),
+    /** The diary item this job is for (a trip's payment, a consent form, a dinner). */
+    forType: text("for_type", { enum: ["event", "trip", "dinner"] }),
     forId: uuid("for_id"),
+    /**
+     * For a dinner: which of its two responsibilities this is. One live job
+     * per dinner and role, so saving again or replanning never makes a second.
+     */
+    role: text("role", { enum: ["cook", "clear"] }),
     /** A rough guess at the time it takes, for the "who carries what" view. */
     minutes: smallint("minutes").notNull().default(15),
     ownerId: uuid("owner_id").references(() => accounts.id),
@@ -821,7 +826,10 @@ export const jobs = pgTable(
     archivedAt: ts("archived_at"),
     version: version(),
   },
-  (t) => [index("jobs_household").on(t.householdId)],
+  (t) => [
+    index("jobs_household").on(t.householdId),
+    uniqueIndex("jobs_link_role").on(t.forId, t.role).where(sql`${t.role} is not null and ${t.archivedAt} is null`),
+  ],
 );
 
 /**
@@ -865,6 +873,106 @@ export const jobDone = pgTable(
     doneAt: created(),
   },
   (t) => [primaryKey({ columns: [t.jobId, t.dueOn] })],
+);
+
+/**
+ * An optional checklist on a job, so owning it covers the whole of it
+ * (football: check the details, wash the kit). It helps the owner remember;
+ * nobody is notified about steps.
+ */
+export const jobSteps = pgTable(
+  "job_steps",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    jobId: uuid("job_id").notNull().references(() => jobs.id),
+    position: smallint("position").notNull(),
+    text: text("text").notNull(),
+    createdAt: created(),
+  },
+  (t) => [index("job_steps_job").on(t.jobId)],
+);
+
+/** A step ticked for one due date of its job. */
+export const jobStepDone = pgTable(
+  "job_step_done",
+  {
+    stepId: uuid("step_id").notNull().references(() => jobSteps.id, { onDelete: "cascade" }),
+    dueOn: date("due_on").notNull(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    doneBy: uuid("done_by").notNull().references(() => accounts.id),
+    doneAt: created(),
+  },
+  (t) => [primaryKey({ columns: [t.stepId, t.dueOn] })],
+);
+
+// ── Dinners and shopping ───────────────────────────────────────────────────
+
+/** The household's own saved meals, with what to buy for each. */
+export const meals = pgTable(
+  "meals",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    name: text("name").notNull(),
+    /** What goes on the shopping list when this is someone's dinner. */
+    ingredients: jsonb("ingredients").$type<string[]>().notNull().default([]),
+    /** Quick enough to be the fallback on a hard evening. */
+    quick: boolean("quick").notNull().default(false),
+    createdBy: uuid("created_by").notNull().references(() => accounts.id),
+    createdAt: created(),
+    archivedAt: ts("archived_at"),
+    version: version(),
+  },
+  (t) => [index("meals_household").on(t.householdId)],
+);
+
+/**
+ * Dinner on one date: a saved meal, the quick fallback, leftovers, eaten
+ * elsewhere, or "decide later". Choosing one reserves nobody's evening; who
+ * cooks and who clears up are jobs, asked and agreed like any other.
+ */
+export const dinners = pgTable(
+  "dinners",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    date: date("date").notNull(),
+    choice: text("choice", { enum: ["meal", "fallback", "leftovers", "elsewhere", "later"] }).notNull(),
+    mealId: uuid("meal_id").references(() => meals.id),
+    /** "At Gran's", "Pizza night out". */
+    note: text("note").notNull().default(""),
+    createdBy: uuid("created_by").notNull().references(() => accounts.id),
+    createdAt: created(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+    version: version(),
+  },
+  (t) => [uniqueIndex("dinners_household_date").on(t.householdId, t.date)],
+);
+
+/**
+ * The shared shopping list. A dinner's ingredients are its own rows, so
+ * dropping one dinner leaves another dinner's milk, and anything added by
+ * hand, where it was.
+ */
+export const shoppingItems = pgTable(
+  "shopping_items",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    name: text("name").notNull(),
+    /** Lower-case, single-spaced: "Milk" and "milk " are one line. */
+    itemKey: text("item_key").notNull(),
+    /** The dinner that needs it; null when someone added it by hand. */
+    dinnerId: uuid("dinner_id").references(() => dinners.id),
+    addedBy: uuid("added_by").notNull().references(() => accounts.id),
+    createdAt: created(),
+    gotAt: ts("got_at"),
+    gotBy: uuid("got_by").references(() => accounts.id),
+    /** Ticked and cleared off the list; kept so a dinner doesn't add it again. */
+    clearedAt: ts("cleared_at"),
+  },
+  (t) => [index("shopping_items_household").on(t.householdId), uniqueIndex("shopping_items_dinner_key").on(t.dinnerId, t.itemKey)],
 );
 
 // ── Our places ─────────────────────────────────────────────────────────────

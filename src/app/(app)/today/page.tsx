@@ -6,6 +6,7 @@ import { deskItems } from "@/db/schema";
 import { loadRange } from "@/server/page-data";
 import { decisionsFor } from "@/server/queries/decisions";
 import { jobsFor } from "@/server/queries/jobs";
+import { mealsFor } from "@/server/queries/meals";
 import { reviewRange } from "@/server/queries/review-range";
 
 export const metadata = { title: "Today" };
@@ -17,10 +18,11 @@ export default async function TodayPage() {
   // The same open decisions the weekly review shows, over the same span.
   const range = reviewRange(now, household.timeZone);
   const decisions = { items: decisionsFor(view, jobs, range, now), until: range.lastDay };
+  const meals = await mealsFor(db, actor, range.from, 1, now);
   const [desk] = await db.select({ id: deskItems.id }).from(deskItems).where(eq(deskItems.householdId, household.id)).limit(1);
   return (
     <AppProvider value={infoFrom(view)}>
-      <TodayView data={view} jobs={jobs} decisions={decisions} deskUsed={!!desk} />
+      <TodayView data={view} jobs={jobs} decisions={decisions} deskUsed={!!desk} meals={meals} />
     </AppProvider>
   );
 }
