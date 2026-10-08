@@ -84,4 +84,4 @@ Desk journey items E1, E2, E4, E7, E8 were not started. Marlon's point that "100
 
 ## Browser journeys
 
-See the PR for the run on this commit.
+All 10 browser journeys (5 journeys, phone and desktop sizes) passed on commit 3e2791a, including the Desk journey, which now also reads the same letter a second time and shows "Already in the diary: added by you" on both cards. The letter's words never appear in anything the browser sends except the titles of what was added.
