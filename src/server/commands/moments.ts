@@ -4,7 +4,7 @@ import { acceptances, childWishes, expenses, feedback, highlights, moments, prep
 import { findConflicts } from "@/domain/availability";
 import { plansWith, whenPhrase } from "@/domain/discreet";
 import { DomainError } from "@/domain/errors";
-import { isAgreed, materialChanges, type AcceptanceRecord, type MomentFields } from "@/domain/moments";
+import { hiddenReason, isAgreed, materialChanges, type AcceptanceRecord, type MomentFields } from "@/domain/moments";
 import { instantToLocalDate, isWeekKey } from "@/domain/time";
 import { defineCommand, assertVersion, type CommandContext } from "../pipeline";
 import { loadBusy } from "../queries/busy";
@@ -300,7 +300,7 @@ export const swapActivity = defineCommand({
       .where(eq(moments.id, m.id))
       .returning();
     if (updated.sharing === "shared" && updated.kind === "family") {
-      for (const other of updated.participantIds.filter((id) => id !== ctx.actor.accountId)) {
+      for (const other of updated.participantIds.filter((id) => id !== ctx.actor.accountId && !hiddenReason(updated, id))) {
         await queueNotification(ctx, {
           recipientId: other,
           kind: "moment.swapped",

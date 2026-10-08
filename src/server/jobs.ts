@@ -41,7 +41,7 @@ export async function queueJobReminders(db: Db, now = new Date()): Promise<{ que
           payload: {
             recipientId: job.ownerId,
             kind: "job.due",
-            text: job.remindDayBefore ? `For tomorrow: ${job.title}.` : `Today: ${job.title}.`,
+            text: job.remindDayBefore ? `For tomorrow${job.dueTime ? `, by ${job.dueTime}` : ""}: ${job.title}.` : `Today${job.dueTime ? `, by ${job.dueTime}` : ""}: ${job.title}.`,
             sourceType: "job",
             sourceId: job.id,
             sourceVersion,

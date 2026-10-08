@@ -23,10 +23,11 @@ const hours = (mins: number) => (mins < 60 ? `${mins} min` : `${Math.round((mins
 function dueLine(j: JobView, today: string): string {
   if (j.status === "done") return "Done";
   if (!j.dueOn) return "";
-  if (j.status === "today") return "Today";
-  if (j.status === "overdue") return `Was due ${fmtDate(j.dueOn)}`;
+  const by = j.dueTime ? ` by ${j.dueTime}` : "";
+  if (j.status === "today") return `Today${by}`;
+  if (j.status === "overdue") return `Was due ${fmtDate(j.dueOn)}${by}`;
   const tomorrow = new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
-  return j.dueOn === tomorrow ? "Tomorrow" : `Next: ${fmtDate(j.dueOn)}`;
+  return j.dueOn === tomorrow ? `Tomorrow${by}` : `Next: ${fmtDate(j.dueOn)}${by}`;
 }
 
 /** One job, with the actions that fit who you are to it. */
@@ -56,6 +57,8 @@ export function JobRow({ job, today, compact = false }: { job: JobView; today: s
             {job.ownerName ? (mine ? "Yours" : job.ownerName) : "Nobody yet"}
             {job.proposedOwnerId && !job.awaitingMyAnswer && <> · asked {partner?.displayName ?? "your partner"}</>}
           </p>
+          {job.forTitle && <p className="text-sm text-ink-3">For {job.forTitle}</p>}
+          {job.notes && !compact && <p className="text-sm text-ink-2">{job.notes}</p>}
           {job.lastDoneBy && job.status !== "overdue" && <p className="text-xs text-ink-3">Last done by {job.lastDoneBy === app.me.displayName ? "you" : job.lastDoneBy}, {fmtDate(job.lastDoneOn!)}</p>}
         </div>
         <div className="flex flex-wrap gap-2">
@@ -160,9 +163,10 @@ function JobEditor({ job, starter, onClose }: { job?: JobView; starter?: (typeof
   const [dayBefore, setDayBefore] = useState(job?.remindDayBefore ?? starter?.remindDayBefore ?? false);
   const [minutes, setMinutes] = useState(String(job?.minutes ?? starter?.minutes ?? 15));
   const [owner, setOwner] = useState<"me" | "partner" | "none">("me");
+  const [dueTime, setDueTime] = useState(job?.dueTime ?? "");
 
   async function save() {
-    const fields = { title, notes, cadence, startsOn, remindDayBefore: dayBefore, minutes: Math.min(600, Math.max(1, Number(minutes) || 15)) };
+    const fields = { title, notes, cadence, startsOn, remindDayBefore: dayBefore, minutes: Math.min(600, Math.max(1, Number(minutes) || 15)), dueTime: cadence === "once" && dueTime ? dueTime : null };
     const ok = job ? await run("EditJob", { jobId: job.id, version: job.version, ...fields }) : await run("AddJob", { ...fields, owner });
     if (ok) onClose();
   }
@@ -190,6 +194,9 @@ function JobEditor({ job, starter, onClose }: { job?: JobView; starter?: (typeof
           </Field>
           <Field label={cadence === "once" ? "When" : "First time"} hint={starter?.hint}>{(id, d) => <input id={id} aria-describedby={d} type="date" className={inputClass} value={startsOn} onChange={(e) => setStartsOn(e.target.value)} />}</Field>
         </div>
+        {cadence === "once" && (
+          <Field label="Due by (optional)" hint="For a cut-off like “by 12 noon”.">{(id, d) => <input id={id} aria-describedby={d} type="time" className={`${inputClass} w-36`} value={dueTime} onChange={(e) => setDueTime(e.target.value)} />}</Field>
+        )}
         <Checkbox checked={dayBefore} onChange={setDayBefore} label="Remind the evening before" hint="For things like bins and PE kit. Otherwise the reminder comes that morning." />
         <Field label="Roughly how long it takes (minutes)" hint="Only used to show who carries what.">{(id, d) => <input id={id} aria-describedby={d} inputMode="numeric" className={`${inputClass} w-28`} value={minutes} onChange={(e) => setMinutes(e.target.value.replace(/\D/g, ""))} />}</Field>
         <Field label="Notes (optional)">{(id) => <textarea id={id} rows={2} maxLength={500} className={`${inputClass} py-2`} value={notes} onChange={(e) => setNotes(e.target.value)} />}</Field>

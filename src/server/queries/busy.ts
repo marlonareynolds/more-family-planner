@@ -4,6 +4,7 @@ import { careArrangements, eventExceptions, events, moments, reservations, trips
 import type { Busy } from "@/domain/availability";
 import type { Interval } from "@/domain/intervals";
 import { expand, type SeriesException } from "@/domain/recurrence";
+import { withheldFromOthers } from "@/domain/moments";
 import { seriesOf } from "../commands/schedule";
 
 export interface EventOccurrence {
@@ -108,7 +109,7 @@ export async function loadBusy(db: DbOrTx, householdId: string, horizon: Interva
   }
 
   const res = await db
-    .select({ r: reservations, m: { title: moments.title, organiserId: moments.organiserId, sharing: moments.sharing, kind: moments.kind }, c: { providerName: careArrangements.providerName } })
+    .select({ r: reservations, m: { title: moments.title, organiserId: moments.organiserId, sharing: moments.sharing, kind: moments.kind, surprise: moments.surprise, lifecycle: moments.lifecycle }, c: { providerName: careArrangements.providerName } })
     .from(reservations)
     .leftJoin(moments, and(eq(reservations.sourceType, "moment"), eq(moments.id, reservations.sourceId)))
     .leftJoin(careArrangements, and(eq(reservations.sourceType, "care"), eq(careArrangements.id, reservations.sourceId)))
@@ -142,8 +143,9 @@ export async function loadBusy(db: DbOrTx, householdId: string, horizon: Interva
       sourceType: isMoment ? "date" : "care",
       sourceId: r.sourceId,
       ownerId: isMoment ? (m?.organiserId ?? r.accountId) : r.accountId,
-      // Me-time is the owner's business; its existence is shared, its title is not.
-      visibility: isMoment && m?.kind === "me" ? "busy_only" : "shared",
+      // Me-time and an unfinished surprise are the organiser's business: the
+      // time is shared, so it clashes as busy, but the title is not.
+      visibility: isMoment && m && withheldFromOthers(m) ? "busy_only" : "shared",
       title: isMoment ? (m?.title ?? "Plan") : "Looking after the children",
     });
   }

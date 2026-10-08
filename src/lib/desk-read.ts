@@ -27,6 +27,23 @@ export interface Proposal {
   source: string;
   /** Before today: shown, but not ticked. Optional items aren't ticked either. */
   past: boolean;
+  /** Whether the letter gave the end time; if not, the end shown is an estimate. */
+  endStated: boolean;
+  /** "Be there by 9:30" when the event starts later. */
+  arriveBy: string | null;
+  location: string;
+  /** What to bring, wear or pay, kept with the entry. */
+  details: string;
+  repeat: "weekly" | "fortnightly" | "monthly" | null;
+  repeatUntil: string | null;
+  /** Who it is for, in the letter's words ("Year 4"), when it names someone. */
+  forWhom: string | null;
+  /** False when the date had to be worked out or could mean more than one day. */
+  dateCertain: boolean;
+  /** Changes the usual drop-off or collection (an early finish, a late start). */
+  pickupChange: boolean;
+  /** For a deadline: the title of the event it belongs to. */
+  forItem: string | null;
 }
 
 export interface ReadContext {
@@ -147,6 +164,8 @@ interface FoundTime {
   start: number;
   end: number;
   time: string;
+  /** Written with am or pm (or noon), so its half of the day is known. */
+  meridiem?: "am" | "pm";
 }
 
 function findTimes(line: string): FoundTime[] {
@@ -155,21 +174,24 @@ function findTimes(line: string): FoundTime[] {
   for (let m = TIME_RE.exec(line); m; m = TIME_RE.exec(line)) {
     let h: number;
     let min: number;
+    let meridiem: FoundTime["meridiem"];
     if (m[6]) {
       h = 12;
       min = 0;
+      meridiem = "pm";
     } else if (m[3]) {
       h = +m[1];
       min = m[2] ? +m[2] : 0;
       if (h < 1 || h > 12 || min > 59) continue;
       const pm = m[3].toLowerCase().startsWith("p");
+      meridiem = pm ? "pm" : "am";
       if (pm && h !== 12) h += 12;
       if (!pm && h === 12) h = 0;
     } else {
       h = +m[4];
       min = +m[5];
     }
-    out.push({ start: m.index, end: m.index + m[0].length, time: `${pad(h)}:${pad(min)}` });
+    out.push({ start: m.index, end: m.index + m[0].length, time: `${pad(h)}:${pad(min)}`, meridiem });
   }
   // "3 - 5pm": the first number borrows the second's am or pm.
   const bare = /\b(\d{1,2})(?:[:.](\d{2}))?\s*(?:-|–|to)\s*(?=\d{1,2}(?:[:.]\d{2})?\s*(am|pm))/gi;
@@ -184,7 +206,16 @@ function findTimes(line: string): FoundTime[] {
     if (m[3].toLowerCase() === "pm" && h !== 12 && h + 12 <= +after.time.slice(0, 2)) h += 12;
     out.push({ start: from, end: from + m[1].length + (m[2] ? m[2].length + 1 : 0), time: `${pad(h)}:${pad(min)}` });
   }
-  return out.sort((a, b) => a.start - b.start);
+  out.sort((a, b) => a.start - b.start);
+  // "6:00-7:15pm": a first time with minutes but no am or pm borrows the
+  // second's pm, so the disco is 18:00 to 19:15, not 06:00 to 19:15.
+  for (let i = 0; i + 1 < out.length; i++) {
+    const [a, b] = [out[i], out[i + 1]];
+    if (a.meridiem || b.meridiem !== "pm" || !/^\s*(?:-|–|—|to|until|till)\s*$/i.test(line.slice(a.end, b.start))) continue;
+    const h = +a.time.slice(0, 2);
+    if (h >= 1 && h < 12 && h + 12 <= +b.time.slice(0, 2)) a.time = `${pad(h + 12)}${a.time.slice(2)}`;
+  }
+  return out;
 }
 
 function addDays(date: string, days: number): string {
@@ -362,7 +393,14 @@ function subjectOf(sentence: string): string | null {
 
 function deadlineTitle(sentence: string, raw: string): string {
   // "Please return the trip consent slip" reads as "Trip consent slip".
-  const base = capital(raw.replace(/^(?:please\s+)?(?:(?:return|send(?: in)?|complete|hand in|bring(?: in)?|pay(?: for)?|book|submit|fill in)\s+)?(?:the |your |a |an )?/i, "")) || raw;
+  const base =
+    capital(
+      raw
+        .replace(/^(?:please\s+)?(?:(?:return|send(?: in)?|complete|hand in|bring(?: in)?|pay(?: for)?|book|submit|fill in)\s+)?(?:the |your |a |an )?/i, "")
+        // "£12.50 for the trip" is the trip's payment; the amount stays in the details.
+        .replace(/^£\d+(?:\.\d{2})?\s+(?:for\s+)?(?:the |your |a |an )?/i, "")
+        .replace(/[.!,;:]+$/, ""),
+    ) || raw;
   const noun = DEADLINE_NOUNS.find(([re]) => re.test(sentence))?.[1] ?? null;
   if (noun === "reply") return `Reply deadline: ${base}`;
   if (!noun || new RegExp(`\\b${noun.slice(0, 5)}`, "i").test(base)) return `${base} deadline`;
@@ -381,6 +419,24 @@ function sameDayEnd(start: string, end: string | undefined, minutes: number): st
   return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
 }
 
+const MONEY = /£\s?\d+(?:\.\d{2})?/g;
+const KIT = /\b(?:bring|wear|packed lunch|pe kit|kit|uniform|costume|waterproof\w*|wellies|non-uniform)\b/i;
+const FOR_WHOM = /\b(?:year\s?\d{1,2}(?:\s?(?:-|–|and|&)\s?(?:year\s?)?\d{1,2})?|reception|nursery|class\s\w+|ks[12])\b/i;
+const EARLY = /\b(?:early|clos\w*|finish\w*)\b/i;
+
+/** What to bring or pay, from the sentence itself: the amounts and the kit words, as the letter says them. */
+function detailsOf(sentence: string): string {
+  const amounts = sentence.match(MONEY) ?? [];
+  if (!amounts.length && !KIT.test(sentence)) return "";
+  return sentence.length > 200 ? `${sentence.slice(0, 199)}…` : sentence;
+}
+
+function repeatOf(sentence: string): Proposal["repeat"] {
+  if (/\bfortnightly\b|\bevery (?:other|second)\b/i.test(sentence)) return "fortnightly";
+  if (/\bmonthly\b|\bevery month\b/i.test(sentence)) return "monthly";
+  return REPEATS.test(sentence) ? "weekly" : null;
+}
+
 /**
  * Read a pasted email or letter into proposed diary items. Deterministic:
  * the same text and day always give the same proposals.
@@ -394,10 +450,25 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
   const out: (Proposal & { section: number; explicitEnd: boolean; sessions: number })[] = [];
   const headingUsed = new Set<number>();
 
-  const push = (p: Omit<Proposal, "key" | "childIds" | "past"> & { section: number; explicitEnd: boolean }, sentence: string) => {
+  type Pushed = Omit<Proposal, "key" | "childIds" | "past" | "endStated" | "arriveBy" | "location" | "details" | "repeat" | "repeatUntil" | "forWhom" | "dateCertain" | "pickupChange" | "forItem"> & {
+    section: number;
+    explicitEnd: boolean;
+    pickupChange?: boolean;
+  };
+  const push = (p: Pushed, sentence: string) => {
     const lineChildren = childrenIn(sentence, ctx.children);
     out.push({
       ...p,
+      endStated: p.explicitEnd,
+      arriveBy: null,
+      location: "",
+      details: detailsOf(sentence),
+      repeat: p.kind === "event" && p.role === "event" ? repeatOf(sentence) : null,
+      repeatUntil: null,
+      forWhom: sentence.match(FOR_WHOM)?.[0] ?? null,
+      dateCertain: true,
+      pickupChange: p.pickupChange ?? false,
+      forItem: null,
       key: "",
       sessions: 0,
       childIds: lineChildren.length ? lineChildren : p.kind === "holiday" ? (letterChildren.length ? letterChildren : ctx.children.map((c) => c.id)) : letterChildren,
@@ -476,21 +547,35 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
 
     for (const span of spans) {
       const single = span.from === span.to;
-      const deadline = single && DEADLINE_WORDS.test(line.replace(ARRIVE_BY, ""));
+      // "£12.50" has a full stop that isn't the end of the sentence.
+      const deadline = single && DEADLINE_WORDS.test(line.replace(ARRIVE_BY, "").replace(/(\d)\.(\d)/g, "$1,$2"));
+      // "School will close at 1:30pm on Friday 19 December for Christmas": an early finish, which changes a pickup.
+      const earlyClose =
+        !deadline && single && times.length === 1 && EARLY.test(line) && CLOSING.test(line) && !REOPEN_WORDS.test(line) && (HOLIDAY_WORDS.test(line) || SEASON.test(line) || /\bearly\b/i.test(line));
       // "School will close for half-term at 3:15pm on Friday 23 October" repeats the break; "any time from Monday" has no event.
-      const optional = !deadline && ((single && OPEN_ENDED.test(line)) || (single && CLOSING.test(line) && HOLIDAY_WORDS.test(line) && times.length > 0 && !REOPEN_WORDS.test(line)));
+      const optional = !deadline && (earlyClose || (single && OPEN_ENDED.test(line)) || (single && CLOSING.test(line) && HOLIDAY_WORDS.test(line) && times.length > 0 && !REOPEN_WORDS.test(line)));
       const kind: ProposalKind = deadline || optional ? "event" : isTrip && TRIP_WORDS.test(line) ? "trip" : isBreak || closingSpan ? "holiday" : "event";
       const role: ProposalRole = deadline ? "deadline" : optional ? "optional" : "event";
 
       let title: string;
       if (deadline) title = deadlineTitle(line, heading || named || cleaned || "Reply");
       else if (optional && CLOSING.test(line) && HOLIDAY_WORDS.test(line)) title = `School closes for ${(line.match(HOLIDAY_WORDS)?.[0] ?? "the break").toLowerCase()}`;
+      else if (earlyClose) title = SEASON.test(line) ? `School closes for ${capital(line.match(SEASON)![1].toLowerCase())}` : "School closes early";
       else if (optional) title = named ?? (cleaned || heading || "From the letter");
       else if (kind === "holiday" && closingSpan) title = heading && !headingUsed.has(s.section) ? heading : `${capital(line.match(SEASON)?.[1]?.toLowerCase() ?? "school")} holidays`;
       else if (kind === "holiday" && !(heading && !headingUsed.has(s.section)) && named && named.split(/\s+/).length < 3) title = capital(cleaned.replace(/^(?:the|our)\s+/i, "").replace(/\s+(?:will be|is)\s+closed\b/i, " closed"));
       else if (heading && !headingUsed.has(s.section)) title = heading;
       else if (heading && !named && cleaned.length < 4) title = heading;
       else title = named ?? (cleaned || heading || subject || "From the letter");
+      // "Flu vaccinations on 14 Oct and school photos on 21 Oct": each date takes the words just before it.
+      if (spans.length > 1 && !REPEATS.test(line) && !deadline && !optional && kind === "event") {
+        const i = spans.indexOf(span);
+        const prev = i === 0 ? null : dates.find((d) => d.start === spans[i - 1].at);
+        const from = prev ? prev.end : 0;
+        const segment = line.slice(from, span.at).replace(/^[\s,;]*(?:and|&|then|also)?\s+/i, "");
+        const own = titleFrom(segment, times.filter((t) => t.start >= from && t.end <= span.at).map((t) => ({ start: t.start - from, end: t.end - from })), "");
+        if (own.length >= 3) title = own;
+      }
       if (role === "event" && heading && title === heading) headingUsed.add(s.section);
 
       // "Last day of term, school finishes at 2pm": the time is when it ends, so the day stays whole and the title keeps it.
@@ -498,9 +583,26 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
       if (endsAt && title === cleaned) title = titleFrom(line, dates, cleaned).replace(/^there(?:'s|’s| is| will be)\s+/i, "");
       const timed = kind !== "holiday" && times.length > 0 && !endsAt;
       const startTime = timed ? times[0].time : null;
-      const endTime = startTime ? sameDayEnd(startTime, single ? times[1]?.time : (times[1]?.time ?? startTime), deadline ? 15 : 60) : null;
-      const explicitEnd = !!times[1] && !!startTime && times[1].time > startTime;
-      push({ kind, role, title: titleFrom(title, [], title), startDate: span.from, endDate: span.to, startTime, endTime, source: line, section: s.section, explicitEnd }, line);
+      // "8pm until 1am" ends the next morning.
+      const overnight = single && !!startTime && !!times[1] && times[1].time < startTime && times[1].time <= "06:00";
+      const endTime = overnight ? times[1].time : startTime ? sameDayEnd(startTime, single ? times[1]?.time : (times[1]?.time ?? startTime), deadline ? 15 : 60) : null;
+      const explicitEnd = !!times[1] && !!startTime && (overnight || times[1].time > startTime);
+      push(
+        {
+          kind,
+          role,
+          title: titleFrom(title, [], title),
+          startDate: span.from,
+          endDate: overnight ? addDays(span.to, 1) : span.to,
+          startTime,
+          endTime,
+          source: line,
+          section: s.section,
+          explicitEnd,
+          pickupChange: earlyClose || endsAt || (optional && CLOSING.test(line) && times.length > 0),
+        },
+        line,
+      );
     }
   }
 
@@ -544,6 +646,16 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
       childIds: p.childIds,
       source: p.source,
       past: p.past,
+      endStated: (p as Proposal & { explicitEnd?: boolean }).explicitEnd ?? p.endStated,
+      arriveBy: p.arriveBy,
+      location: p.location,
+      details: p.details,
+      repeat: p.repeat,
+      repeatUntil: p.repeatUntil,
+      forWhom: p.forWhom,
+      dateCertain: p.dateCertain,
+      pickupChange: p.pickupChange,
+      forItem: p.forItem,
       key: `p${i}`,
     }));
 }

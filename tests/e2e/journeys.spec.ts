@@ -297,15 +297,14 @@ test("the household desk reads a pasted letter on the phone and adds only what's
   const uk = (d: string) => d.split("-").reverse().join("/");
   await go(alex, "/desk");
   await axe(alex);
-  await alex.getByLabel("Letter, email or booking").fill(
-    [
-      "From: School office <office@school.example>",
-      "Dear parents,",
-      `Half term is from ${uk(inDays(20))} to ${uk(inDays(24))}.`,
-      `Parents' evening: ${uk(inDays(10))}, 3.30pm - 6pm. Robin's teacher will be there.`,
-      `Cake sale ${uk(inDays(12))}.`,
-    ].join("\n"),
-  );
+  const letter = [
+    "From: School office <office@school.example>",
+    "Dear parents,",
+    `Half term is from ${uk(inDays(20))} to ${uk(inDays(24))}.`,
+    `Parents' evening: ${uk(inDays(10))}, 3.30pm - 6pm. Robin's teacher will be there.`,
+    `Cake sale ${uk(inDays(12))}.`,
+  ].join("\n");
+  await alex.getByLabel("Letter, email or booking").fill(letter);
   await alex.getByRole("button", { name: "Read it" }).click();
   await expect(alex.getByRole("heading", { name: "Found 3 things" })).toBeVisible();
   await axe(alex);
@@ -315,6 +314,14 @@ test("the household desk reads a pasted letter on the phone and adds only what's
   await expect(alex.getByText("Added: Parents' evening")).toBeVisible();
   await expect(alex.getByText("Added: Half term")).toBeVisible();
   expect(sent.some((b) => b.includes("Robin's teacher") || b.includes("office@school.example") || b.includes("Cake sale"))).toBe(false);
+
+  // Reading the same letter again: the server remembers, so nothing goes in twice.
+  await alex.getByRole("button", { name: "Start again" }).click();
+  await alex.getByLabel("Letter, email or booking").fill(letter);
+  await alex.getByRole("button", { name: "Read it" }).click();
+  await expect(alex.getByText(/Already in the diary: added by you/)).toHaveCount(2);
+  await expect(alex.getByRole("button", { name: "Add 1 thing" })).toBeVisible();
+  expect(sent.some((b) => b.includes("Robin's teacher") || b.includes("office@school.example"))).toBe(false);
 
   await go(alex, "/holidays");
   await expect(alex.getByText("Half term", { exact: true })).toBeVisible();

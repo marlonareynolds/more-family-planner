@@ -3,7 +3,7 @@ import { z } from "zod";
 import { jobDone, jobs } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import { defineCommand, assertVersion, type CommandContext } from "../pipeline";
-import { currentAdults, dateString, queueNotification, requiredText, shortText, supersedeDeliveries } from "./helpers";
+import { currentAdults, dateString, queueNotification, requiredText, shortText, supersedeDeliveries, timeString } from "./helpers";
 
 /**
  * The shared load: recurring household jobs with one agreed owner each.
@@ -18,6 +18,8 @@ const jobFields = z.object({
   startsOn: dateString,
   remindDayBefore: z.boolean().default(false),
   minutes: z.number().int().min(1).max(600).default(15),
+  /** A precise cut-off for a one-off ("by 12 noon"); left out, it stays as it was. */
+  dueTime: timeString.nullable().optional(),
 });
 
 async function loadJob(ctx: CommandContext, id: string) {
@@ -33,8 +35,15 @@ async function partnerOf(ctx: CommandContext) {
 export const addJob = defineCommand({
   name: "AddJob",
   scope: "household",
-  payload: jobFields.extend({ owner: z.enum(["me", "partner", "none"]).default("me") }),
+  payload: jobFields.extend({
+    owner: z.enum(["me", "partner", "none"]).default("me"),
+    /** The diary item this is for: a trip's payment, its consent form. */
+    forType: z.enum(["event", "trip"]).nullable().default(null),
+    forId: z.uuid().nullable().default(null),
+  }),
   async handler(ctx, p) {
+    if (p.dueTime && p.cadence !== "once") throw new DomainError("VALIDATION", "A cut-off time is for a one-off job.");
+    if ((p.forType === null) !== (p.forId === null)) throw new DomainError("VALIDATION", "Say which diary item this is for.");
     const count = await ctx.tx.$count(jobs, and(eq(jobs.householdId, ctx.household.id), isNull(jobs.archivedAt)));
     if (count >= 60) throw new DomainError("VALIDATION", "Up to sixty jobs can be tracked. Archive a few you no longer need.");
     const partner = p.owner === "partner" ? await partnerOf(ctx) : null;
