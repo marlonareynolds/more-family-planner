@@ -1,6 +1,6 @@
-import { and, eq, gte, isNull } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { jobDone, jobs } from "@/db/schema";
+import { jobDone, jobStepDone, jobSteps, jobs } from "@/db/schema";
 import { jobCadenceLabel, jobStatus, monthlyMinutes, type JobCadence, type JobStatus } from "@/domain/jobs";
 import { addDays, instantToLocal, instantToLocalDate } from "@/domain/time";
 import type { Actor } from "../auth";
@@ -29,6 +29,10 @@ export interface JobView {
   dueTime: string | null;
   /** The diary item it is for, if the viewer may see it ("Year 4 Trip to the Science Museum"). */
   forTitle: string | null;
+  /** Cooking or clearing up for a dinner: that dinner's id and part. */
+  dinner: { id: string; role: "cook" | "clear" } | null;
+  /** The optional checklist, ticked for the due date shown. */
+  steps: { id: string; text: string; done: boolean }[];
   /** Who did the most recent due date, if it's done. */
   lastDoneBy: string | null;
   lastDoneOn: string | null;
@@ -56,7 +60,12 @@ export async function jobsFor(db: Db, actor: Actor, now = new Date()): Promise<J
   const today = instantToLocalDate(now.getTime(), household.timeZone);
   const adults = await currentAdults(db, household.id);
   const name = (id: string | null) => (id ? (adults.find((a) => a.id === id)?.displayName ?? null) : null);
-  const rows = await db.select().from(jobs).where(and(eq(jobs.householdId, household.id), isNull(jobs.archivedAt))).orderBy(jobs.createdAt);
+  const all = await db.select().from(jobs).where(and(eq(jobs.householdId, household.id), isNull(jobs.archivedAt))).orderBy(jobs.createdAt);
+  // A dinner's job for an evening that's gone is history, not something overdue.
+  const rows = all.filter((j) => !(j.forType === "dinner" && j.startsOn < today));
+  const steps = rows.length ? await db.select().from(jobSteps).where(inArray(jobSteps.jobId, rows.map((j) => j.id))).orderBy(jobSteps.position) : [];
+  const ticks = steps.length ? await db.select().from(jobStepDone).where(inArray(jobStepDone.stepId, steps.map((s) => s.id))) : [];
+  const ticked = new Set(ticks.map((t) => `${t.stepId}:${t.dueOn}`));
   const done = await db.select().from(jobDone).where(and(eq(jobDone.householdId, household.id), gte(jobDone.dueOn, addDays(today, -400))));
   const doneBy = new Map(done.map((d) => [`${d.jobId}:${d.dueOn}`, d.doneBy]));
 
@@ -95,6 +104,8 @@ export async function jobsFor(db: Db, actor: Actor, now = new Date()): Promise<J
       dueOn,
       dueTime: j.dueTime,
       forTitle: j.forId ? (forTitles.get(j.forId) ?? null) : null,
+      dinner: j.forType === "dinner" && j.forId && j.role ? { id: j.forId, role: j.role } : null,
+      steps: steps.filter((s) => s.jobId === j.id).map((s) => ({ id: s.id, text: s.text, done: !!dueOn && ticked.has(`${s.id}:${dueOn}`) })),
       lastDoneBy: recent ? name(doneBy.get(`${j.id}:${recent}`) ?? null) : null,
       lastDoneOn: recent,
       version: j.version,

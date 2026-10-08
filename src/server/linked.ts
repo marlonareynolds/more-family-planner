@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { DbOrTx } from "@/db/client";
-import { events, trips } from "@/db/schema";
+import { fmtDate } from "@/components/format";
+import { dinners, events, trips } from "@/db/schema";
 
 /**
  * The one place that decides whether a diary item may be linked to, or named
@@ -9,7 +10,7 @@ import { events, trips } from "@/db/schema";
  * own. A forged or stale id resolves to nothing, never to another
  * household's title.
  */
-export async function linkedTitles(db: DbOrTx, householdId: string, viewerId: string, refs: { type: "event" | "trip"; id: string }[]): Promise<Map<string, string>> {
+export async function linkedTitles(db: DbOrTx, householdId: string, viewerId: string, refs: { type: "event" | "trip" | "dinner"; id: string }[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   const eventIds = [...new Set(refs.filter((r) => r.type === "event").map((r) => r.id))];
   const tripIds = [...new Set(refs.filter((r) => r.type === "trip").map((r) => r.id))];
@@ -23,6 +24,11 @@ export async function linkedTitles(db: DbOrTx, householdId: string, viewerId: st
   if (tripIds.length) {
     const rows = await db.select({ id: trips.id, title: trips.title }).from(trips).where(and(inArray(trips.id, tripIds), eq(trips.householdId, householdId), isNull(trips.cancelledAt)));
     for (const t of rows) out.set(t.id, t.title);
+  }
+  const dinnerIds = [...new Set(refs.filter((r) => r.type === "dinner").map((r) => r.id))];
+  if (dinnerIds.length) {
+    const rows = await db.select({ id: dinners.id, date: dinners.date }).from(dinners).where(and(inArray(dinners.id, dinnerIds), eq(dinners.householdId, householdId)));
+    for (const d of rows) out.set(d.id, `dinner, ${fmtDate(d.date)}`);
   }
   return out;
 }

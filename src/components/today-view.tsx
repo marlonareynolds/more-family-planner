@@ -5,11 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { DecisionItem } from "@/domain/decisions";
+import type { MealsView } from "@/server/queries/meals";
 import type { JobsView } from "@/server/queries/jobs";
 import type { WeekView } from "@/server/queries/week";
 import { useApp, useNow } from "./app-context";
 import { CheckinDialog } from "./checkin-dialog";
 import { DecisionSummary } from "./decision-review";
+import { TonightDinner } from "./dinners";
 import { fmtDate, localParts, mondayOf, todayIn } from "./format";
 import { JobsToday } from "./jobs";
 import { MomentCard } from "./moment-card";
@@ -64,7 +66,7 @@ function whenLabel(m: { start: number }, today: string, tz: string): string {
   return `${fmtDate(date)} at ${time}`;
 }
 
-export function TodayView({ data, jobs, decisions, deskUsed = true }: { data: WeekView; jobs?: JobsView; decisions?: { items: DecisionItem[]; until: string }; deskUsed?: boolean }) {
+export function TodayView({ data, jobs, decisions, deskUsed = true, meals }: { data: WeekView; jobs?: JobsView; decisions?: { items: DecisionItem[]; until: string }; deskUsed?: boolean; meals?: MealsView }) {
   const app = useApp();
   const router = useRouter();
   const now = useNow();
@@ -287,6 +289,7 @@ export function TodayView({ data, jobs, decisions, deskUsed = true }: { data: We
       )}
 
       {decisions && <DecisionSummary items={decisions.items} until={decisions.until} />}
+      {meals && <TonightDinner data={meals} />}
 
       {jobs && <JobsToday data={jobs} />}
 

@@ -1,7 +1,9 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { jobDone, jobs } from "@/db/schema";
+import { jobDone, jobStepDone, jobSteps, jobs } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
+import { ACTIVE_JOB_LIMIT, isActiveJob } from "@/domain/jobs";
+import { instantToLocalDate } from "@/domain/time";
 import { linkedTitles } from "../linked";
 import { defineCommand, assertVersion, type CommandContext } from "../pipeline";
 import { currentAdults, dateString, queueNotification, requiredText, shortText, supersedeDeliveries, timeString } from "./helpers";
@@ -29,8 +31,40 @@ async function loadJob(ctx: CommandContext, id: string) {
   return j;
 }
 
-async function partnerOf(ctx: CommandContext) {
+export async function partnerOf(ctx: CommandContext) {
   return (await currentAdults(ctx.tx, ctx.household.id)).find((a) => a.id !== ctx.actor.accountId) ?? null;
+}
+
+/** A checklist: up to twelve short steps, blanks dropped. */
+const stepList = z.array(shortText(80)).max(12).default([]).transform((s) => s.filter(Boolean));
+
+/**
+ * Refuse a new job when the household already tracks sixty live ones. Done
+ * one-offs and past dinners don't count (see `isActiveJob`), so the limit
+ * is about what's live, not about history.
+ */
+export async function assertRoomForJob(ctx: CommandContext): Promise<void> {
+  const rows = await ctx.tx.select({ id: jobs.id, cadence: jobs.cadence, startsOn: jobs.startsOn, forType: jobs.forType, archivedAt: jobs.archivedAt }).from(jobs).where(and(eq(jobs.householdId, ctx.household.id), isNull(jobs.archivedAt)));
+  if (rows.length < ACTIVE_JOB_LIMIT) return;
+  const today = instantToLocalDate(ctx.now.getTime(), ctx.household.timeZone);
+  const once = rows.filter((r) => r.cadence === "once");
+  const done = once.length ? await ctx.tx.select({ jobId: jobDone.jobId, dueOn: jobDone.dueOn }).from(jobDone).where(inArray(jobDone.jobId, once.map((r) => r.id))) : [];
+  const doneKeys = new Set(done.map((d) => `${d.jobId}:${d.dueOn}`));
+  const active = rows.filter((r) => isActiveJob(r, today, new Set(doneKeys.has(`${r.id}:${r.startsOn}`) ? [r.startsOn] : []))).length;
+  if (active >= ACTIVE_JOB_LIMIT) throw new DomainError("VALIDATION", "Up to sixty jobs can be tracked. Archive a few you no longer need.");
+}
+
+export async function writeSteps(ctx: CommandContext, jobId: string, steps: readonly string[]): Promise<void> {
+  // Keep a step that is unchanged, so its ticks stay; drop the rest.
+  const old = await ctx.tx.select().from(jobSteps).where(eq(jobSteps.jobId, jobId));
+  const keep = new Map(old.map((s) => [s.text, s]));
+  const gone = old.filter((s) => !steps.includes(s.text));
+  if (gone.length) await ctx.tx.delete(jobSteps).where(inArray(jobSteps.id, gone.map((s) => s.id)));
+  for (const [position, text] of steps.entries()) {
+    const was = keep.get(text);
+    if (was) await ctx.tx.update(jobSteps).set({ position }).where(eq(jobSteps.id, was.id));
+    else await ctx.tx.insert(jobSteps).values({ householdId: ctx.household.id, jobId, position, text });
+  }
 }
 
 export const addJob = defineCommand({
@@ -41,6 +75,8 @@ export const addJob = defineCommand({
     /** The diary item this is for: a trip's payment, its consent form. */
     forType: z.enum(["event", "trip"]).nullable().default(null),
     forId: z.uuid().nullable().default(null),
+    /** An optional checklist, from a template or typed. */
+    steps: stepList,
   }),
   async handler(ctx, p) {
     if (p.dueTime && p.cadence !== "once") throw new DomainError("VALIDATION", "A cut-off time is for a one-off job.");
@@ -49,11 +85,10 @@ export const addJob = defineCommand({
     if (p.forType && p.forId && !(await linkedTitles(ctx.tx, ctx.household.id, ctx.actor.accountId, [{ type: p.forType, id: p.forId }])).has(p.forId)) {
       throw new DomainError("NOT_FOUND", "That diary item could not be found.");
     }
-    const count = await ctx.tx.$count(jobs, and(eq(jobs.householdId, ctx.household.id), isNull(jobs.archivedAt)));
-    if (count >= 60) throw new DomainError("VALIDATION", "Up to sixty jobs can be tracked. Archive a few you no longer need.");
+    await assertRoomForJob(ctx);
     const partner = p.owner === "partner" ? await partnerOf(ctx) : null;
     if (p.owner === "partner" && !partner) throw new DomainError("VALIDATION", "Invite your partner before asking them to take a job on.");
-    const { owner, ...fields } = p;
+    const { owner, steps, ...fields } = p;
     const [j] = await ctx.tx
       .insert(jobs)
       .values({
@@ -65,6 +100,7 @@ export const addJob = defineCommand({
         proposedBy: partner ? ctx.actor.accountId : null,
       })
       .returning();
+    if (steps.length) await writeSteps(ctx, j.id, steps);
     if (partner) {
       await queueNotification(ctx, { recipientId: partner.id, kind: "job.proposed", text: `${ctx.actor.displayName} asked if you could take on “${j.title}”.`, sourceType: "job", sourceId: j.id, sourceVersion: j.version });
     }
@@ -77,12 +113,17 @@ export const addJob = defineCommand({
 export const editJob = defineCommand({
   name: "EditJob",
   scope: "household",
-  payload: jobFields.extend({ jobId: z.uuid(), version: z.number().int() }),
+  payload: jobFields.extend({ jobId: z.uuid(), version: z.number().int(), steps: z.array(shortText(80)).max(12).transform((s) => s.filter(Boolean)).optional() }),
   async handler(ctx, p) {
     const j = await loadJob(ctx, p.jobId);
     assertVersion(j, p.version, "This job");
-    const { jobId, version, ...fields } = p;
+    const { jobId, version, steps, ...fields } = p;
     void version;
+    // A dinner's job follows its dinner: move the dinner, and the job moves with it.
+    if (j.forType === "dinner" && (fields.cadence !== j.cadence || fields.startsOn !== j.startsOn)) {
+      throw new DomainError("VALIDATION", "This is part of a dinner. Change the day on Our Week, and the job moves with it.");
+    }
+    if (steps) await writeSteps(ctx, j.id, steps);
     await ctx.tx.update(jobs).set({ ...fields, version: sql`${jobs.version} + 1` }).where(eq(jobs.id, jobId));
     // New dates mean new reminders; the old ones must not fire.
     if (fields.cadence !== j.cadence || fields.startsOn !== j.startsOn || fields.remindDayBefore !== j.remindDayBefore) await supersedeDeliveries(ctx.tx, j.id, "job.due");
@@ -169,6 +210,21 @@ export const markJobDone = defineCommand({
     }
     await ctx.audit("job.done", "job", j.id);
     return { jobId: j.id };
+  },
+});
+
+/** Tick or untick one checklist step for one due date. Nobody is notified. */
+export const tickJobStep = defineCommand({
+  name: "TickJobStep",
+  scope: "household",
+  payload: z.object({ stepId: z.uuid(), dueOn: dateString, done: z.boolean() }),
+  async handler(ctx, p) {
+    const [s] = await ctx.tx.select().from(jobSteps).where(and(eq(jobSteps.id, p.stepId), eq(jobSteps.householdId, ctx.household.id)));
+    if (!s) throw new DomainError("NOT_FOUND", "That step could not be found.");
+    await loadJob(ctx, s.jobId);
+    if (p.done) await ctx.tx.insert(jobStepDone).values({ stepId: s.id, dueOn: p.dueOn, householdId: ctx.household.id, doneBy: ctx.actor.accountId }).onConflictDoNothing();
+    else await ctx.tx.delete(jobStepDone).where(and(eq(jobStepDone.stepId, s.id), eq(jobStepDone.dueOn, p.dueOn)));
+    return { stepId: s.id };
   },
 });
 

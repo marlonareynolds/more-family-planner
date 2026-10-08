@@ -3,7 +3,7 @@
 import { ListChecks } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { JOB_STARTERS, type JobCadence } from "@/domain/jobs";
+import { JOB_STARTERS, JOB_TEMPLATES, type JobCadence, type JobTemplate } from "@/domain/jobs";
 import type { JobsView, JobView } from "@/server/queries/jobs";
 import { useApp } from "./app-context";
 import { fmtDate, todayIn } from "./format";
@@ -59,6 +59,7 @@ export function JobRow({ job, today, compact = false }: { job: JobView; today: s
           </p>
           {job.forTitle && <p className="text-sm text-ink-3">For {job.forTitle}</p>}
           {job.notes && !compact && <p className="text-sm text-ink-2">{job.notes}</p>}
+          {job.steps.length > 0 && <Checklist job={job} open={!compact || mine} />}
           {job.lastDoneBy && job.status !== "overdue" && <p className="text-xs text-ink-3">Last done by {job.lastDoneBy === app.me.displayName ? "you" : job.lastDoneBy}, {fmtDate(job.lastDoneOn!)}</p>}
         </div>
         <div className="flex flex-wrap gap-2">
@@ -87,10 +88,36 @@ export function JobRow({ job, today, compact = false }: { job: JobView; today: s
   );
 }
 
+/**
+ * The owner's own checklist for the due date shown. Anyone can tick a step,
+ * nobody is told, and the partner sees no running count on Today.
+ */
+function Checklist({ job, open }: { job: JobView; open: boolean }) {
+  const app = useApp();
+  const { run, pending } = useCommand(app.householdId);
+  const done = job.steps.filter((s) => s.done).length;
+  if (!open || !job.dueOn) return <p className="text-xs text-ink-3">{job.steps.length} step{job.steps.length === 1 ? "" : "s"}</p>;
+  return (
+    <details className="mt-1">
+      <summary className="cursor-pointer text-sm text-ink-2">Checklist, {done} of {job.steps.length} ready{job.dueOn ? ` for ${fmtDate(job.dueOn)}` : ""}</summary>
+      <ul className="mt-1 flex flex-col gap-1">
+        {job.steps.map((s) => (
+          <li key={s.id}>
+            <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm">
+              <input type="checkbox" className="size-5 accent-[var(--brand)]" checked={s.done} disabled={pending} onChange={(e) => run("TickJobStep", { stepId: s.id, dueOn: job.dueOn, done: e.target.checked })} />
+              <span className={s.done ? "text-ink-3 line-through" : ""}>{s.text}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export function JobsBoard({ data }: { data: JobsView }) {
   const app = useApp();
   const [adding, setAdding] = useState(false);
-  const [starter, setStarter] = useState<(typeof JOB_STARTERS)[number] | null>(null);
+  const [starter, setStarter] = useState<(typeof JOB_STARTERS)[number] | JobTemplate | null>(null);
   const today = data.today || todayIn(app.timeZone);
   const due = data.jobs.filter((j) => j.status === "today" || j.status === "overdue" || j.awaitingMyAnswer);
   const rest = data.jobs.filter((j) => !due.includes(j));
@@ -147,12 +174,21 @@ export function JobsBoard({ data }: { data: JobsView }) {
           </ul>
         </>
       )}
+      <h2 className="mt-6 text-sm font-medium text-ink-2">With a checklist</h2>
+      <p className="text-xs text-ink-3">For responsibilities with several parts. Remove any step that doesn&apos;t fit.</p>
+      <ul className="mt-2 flex flex-wrap gap-2">
+        {JOB_TEMPLATES.map((s) => (
+          <li key={s.key}>
+            <button type="button" className="min-h-10 rounded-full border border-line px-3 text-sm hover:border-brand" onClick={() => setStarter(s)}>+ {s.title}</button>
+          </li>
+        ))}
+      </ul>
       {(adding || starter) && <JobEditor starter={starter} onClose={() => { setAdding(false); setStarter(null); }} />}
     </div>
   );
 }
 
-function JobEditor({ job, starter, onClose }: { job?: JobView; starter?: (typeof JOB_STARTERS)[number] | null; onClose: () => void }) {
+function JobEditor({ job, starter, onClose }: { job?: JobView; starter?: (typeof JOB_STARTERS)[number] | JobTemplate | null; onClose: () => void }) {
   const app = useApp();
   const { run, pending, error } = useCommand(app.householdId);
   const partner = app.adults.find((a) => a.id !== app.me.id) ?? null;
@@ -164,9 +200,11 @@ function JobEditor({ job, starter, onClose }: { job?: JobView; starter?: (typeof
   const [minutes, setMinutes] = useState(String(job?.minutes ?? starter?.minutes ?? 15));
   const [owner, setOwner] = useState<"me" | "partner" | "none">("me");
   const [dueTime, setDueTime] = useState(job?.dueTime ?? "");
+  const [steps, setSteps] = useState<string[]>(job?.steps.map((s) => s.text) ?? (starter && "steps" in starter ? starter.steps : []));
+  const [step, setStep] = useState("");
 
   async function save() {
-    const fields = { title, notes, cadence, startsOn, remindDayBefore: dayBefore, minutes: Math.min(600, Math.max(1, Number(minutes) || 15)), dueTime: cadence === "once" && dueTime ? dueTime : null };
+    const fields = { title, notes, cadence, startsOn, remindDayBefore: dayBefore, minutes: Math.min(600, Math.max(1, Number(minutes) || 15)), dueTime: cadence === "once" && dueTime ? dueTime : null, steps };
     const ok = job ? await run("EditJob", { jobId: job.id, version: job.version, ...fields }) : await run("AddJob", { ...fields, owner });
     if (ok) onClose();
   }
@@ -187,18 +225,39 @@ function JobEditor({ job, starter, onClose }: { job?: JobView; starter?: (typeof
         <div className="grid grid-cols-2 gap-3">
           <Field label="How often">
             {(id) => (
-              <select id={id} className={inputClass} value={cadence} onChange={(e) => setCadence(e.target.value as JobCadence)}>
+              <select id={id} className={inputClass} value={cadence} disabled={!!job?.dinner} onChange={(e) => setCadence(e.target.value as JobCadence)}>
                 {CADENCES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
             )}
           </Field>
-          <Field label={cadence === "once" ? "When" : "First time"} hint={starter?.hint}>{(id, d) => <input id={id} aria-describedby={d} type="date" className={inputClass} value={startsOn} onChange={(e) => setStartsOn(e.target.value)} />}</Field>
+          <Field label={cadence === "once" ? "When" : "First time"} hint={job?.dinner ? "Set by the dinner: move it on Our Week." : starter?.hint}>{(id, d) => <input id={id} aria-describedby={d} type="date" className={inputClass} value={startsOn} disabled={!!job?.dinner} onChange={(e) => setStartsOn(e.target.value)} />}</Field>
         </div>
         {cadence === "once" && (
           <Field label="Due by (optional)" hint="For a cut-off like “by 12 noon”.">{(id, d) => <input id={id} aria-describedby={d} type="time" className={`${inputClass} w-36`} value={dueTime} onChange={(e) => setDueTime(e.target.value)} />}</Field>
         )}
         <Checkbox checked={dayBefore} onChange={setDayBefore} label="Remind the evening before" hint="For things like bins and PE kit. Otherwise the reminder comes that morning." />
         <Field label="Roughly how long it takes (minutes)" hint="Only used to show who carries what.">{(id, d) => <input id={id} aria-describedby={d} inputMode="numeric" className={`${inputClass} w-28`} value={minutes} onChange={(e) => setMinutes(e.target.value.replace(/\D/g, ""))} />}</Field>
+        <fieldset>
+          <legend className="text-sm font-medium text-ink-2">Checklist (optional)</legend>
+          <p className="text-xs text-ink-3">The parts of the job, for whoever owns it. Nobody is told about ticks.</p>
+          {steps.length > 0 && (
+            <ul className="mt-2 flex flex-col gap-1">
+              {steps.map((s, i) => (
+                <li key={`${s}-${i}`} className="flex items-center justify-between gap-2 rounded-xl bg-surface-2 px-3 py-1.5 text-sm">
+                  {s}
+                  <button type="button" className="min-h-9 px-2 text-ink-3 hover:text-bad" aria-label={`Remove step: ${s}`} onClick={() => setSteps(steps.filter((_, j) => j !== i))}>×</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {steps.length < 12 && (
+            <div className="mt-2 flex gap-2">
+              <label htmlFor="job-step" className="sr-only">Add a step</label>
+              <input id="job-step" maxLength={80} className={inputClass} value={step} onChange={(e) => setStep(e.target.value)} placeholder="Add a step" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (step.trim()) { setSteps([...steps, step.trim()]); setStep(""); } } }} />
+              <Button type="button" size="sm" disabled={!step.trim()} onClick={() => { setSteps([...steps, step.trim()]); setStep(""); }}>Add</Button>
+            </div>
+          )}
+        </fieldset>
         <Field label="Notes (optional)">{(id) => <textarea id={id} rows={2} maxLength={500} className={`${inputClass} py-2`} value={notes} onChange={(e) => setNotes(e.target.value)} />}</Field>
         {!job && (
           <fieldset>

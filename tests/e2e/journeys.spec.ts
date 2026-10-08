@@ -455,3 +455,58 @@ test("the weekly review shows a deadline with its own action and can finish with
   await expect(alex.getByText(/Decisions to make by/)).toBeVisible();
   await expect(alex.getByText("1 for you")).toBeVisible();
 });
+
+test("dinner on a hard evening: save meals, choose tonight, ask the partner to cook, share the list", async ({ browser }, info) => {
+  const tag = `${info.project.name}-m${Date.now().toString(36)}`;
+  const vp = info.project.name === "phone" ? { width: 412, height: 915 } : undefined;
+  const alex = await adult(browser, `Alex ${tag}`, vp);
+  await alex.getByLabel("Household name").fill(`Household ${tag}`);
+  await alex.getByRole("button", { name: "Start our household" }).click();
+  await alex.waitForURL(/\/welcome/);
+  await go(alex, "/settings");
+  await alex.getByRole("button", { name: "Invite your partner" }).click();
+  const link = await alex.getByLabel("Invitation link").inputValue();
+  const sam = await adult(browser, `Sam ${tag}`, vp);
+  await go(sam, new URL(link).pathname);
+  await sam.getByRole("button", { name: /join/i }).click();
+  await sam.waitForURL(/\/welcome/);
+
+  // Two saved meals: one usual, one quick.
+  await go(alex, "/week");
+  const dinners = alex.locator("#dinners");
+  await dinners.getByRole("button", { name: "Our meals" }).click();
+  const dialog = alex.getByRole("dialog");
+  await dialog.getByLabel("Meal").fill("Fish pie");
+  await dialog.getByLabel("What to buy for it (optional)").fill("Fish\nPotatoes\nMilk");
+  await dialog.getByRole("button", { name: "Save meal" }).click();
+  await dialog.getByRole("button", { name: "+ Add a meal" }).click();
+  await dialog.getByLabel("Meal").fill("Beans on toast");
+  await dialog.getByLabel("Quick enough for a hard evening").check();
+  await dialog.getByRole("button", { name: "Save meal" }).click();
+  await expect(dialog.getByText("Beans on toast")).toBeVisible();
+  await alex.keyboard.press("Escape");
+
+  // Tonight: Fish pie, and Sam is asked to cook. It's a request, not a plan.
+  await dinners.getByRole("button", { name: "Choose dinner for tonight" }).click();
+  await alex.getByRole("dialog").getByLabel("Which meal").selectOption({ label: "Fish pie" });
+  await alex.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+  await expect(dinners.getByText("Fish pie")).toBeVisible();
+  await dinners.getByRole("button", { name: `Ask Sam ${tag}` }).first().click();
+  await expect(dinners.getByText(`Asked Sam ${tag}, not yet agreed`)).toBeVisible();
+  await expect(alex.locator("#shopping").getByText("Potatoes")).toBeVisible();
+  await alex.locator("#shopping").getByLabel("Add to the list").fill("Washing-up liquid");
+  await alex.locator("#shopping").getByRole("button", { name: "Add" }).click();
+  await expect(alex.locator("#shopping").getByText("Washing-up liquid")).toBeVisible();
+  await axe(alex);
+  await alex.screenshot({ path: `test-results/dinners-${info.project.name}.png`, fullPage: true });
+
+  // Sam sees tonight on Today and answers on the week.
+  await go(sam, "/today");
+  await expect(sam.getByText("Tonight's dinner: Fish pie")).toBeVisible();
+  await expect(sam.getByText(/4 things on the shopping list/)).toBeVisible();
+  await go(sam, "/week");
+  await sam.locator("#dinners").getByRole("button", { name: "Yes, I'll do it" }).click();
+  await expect(sam.locator("#dinners").getByText(/Cooking: You/)).toBeVisible();
+  await sam.locator("#shopping").getByRole("checkbox", { name: /Milk/ }).check();
+  await expect(sam.locator("#shopping").getByRole("checkbox", { name: /Milk/ })).toBeChecked();
+});
