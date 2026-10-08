@@ -6,8 +6,9 @@ import { useApp } from "./app-context";
 import { addDaysStr, mondayOf, todayIn } from "./format";
 import { Button, Card, ErrorNote, Field, inputClass } from "./ui";
 import { useCommand } from "./use-command";
+import { DeskBoard } from "./desk";
 
-type Step = "children" | "holidays" | "work" | "calendar" | "invite" | "done";
+type Step = "children" | "letters" | "holidays" | "work" | "calendar" | "invite" | "done";
 const AGE_BANDS = ["0-4", "5-7", "8-11", "12-15", "16+"] as const;
 const DAYS = [
   { code: "MO", label: "Mon" },
@@ -25,26 +26,37 @@ const HOLIDAYS = ["Autumn half term", "Christmas holidays", "Spring half term", 
  * usual working pattern, a calendar link and the partner invite. Every step
  * can be skipped and done later in Settings.
  */
-export function Welcome({ has }: { has: { children: boolean; holidays: boolean; work: boolean; calendar: boolean; partner: boolean } }) {
+export function Welcome({ has, ai = false }: { has: { children: boolean; holidays: boolean; work: boolean; calendar: boolean; partner: boolean; letters: boolean }; ai?: boolean }) {
   const app = useApp();
-  const steps: Step[] = [
+  // Fixed when the page opens: adding things on the way must not move the steps under the person.
+  const [steps] = useState<Step[]>(() => [
     ...(!has.children && !has.partner ? (["children"] as const) : []),
+    // Letters next: term dates and school letters fill the diary fastest, and can cover the holidays too.
+    ...(!has.letters ? (["letters"] as const) : []),
     // Holidays only make sense once there are children.
     ...(!has.holidays && app.children.length > 0 ? (["holidays"] as const) : []),
     ...(!has.work ? (["work"] as const) : []),
     ...(!has.calendar ? (["calendar"] as const) : []),
     ...(!has.partner ? (["invite"] as const) : []),
     "done" as const,
-  ];
+  ]);
   const [i, setI] = useState(0);
+  /** A school break came in from a letter, so the holidays form isn't needed. */
+  const [breaksAdded, setBreaksAdded] = useState(false);
   const step = steps[i];
-  const next = () => setI((n) => Math.min(n + 1, steps.length - 1));
+  const next = () =>
+    setI((n) => {
+      let to = Math.min(n + 1, steps.length - 1);
+      if (steps[to] === "holidays" && breaksAdded) to = Math.min(to + 1, steps.length - 1);
+      return to;
+    });
   const current: Step = step;
 
   return (
     <div className="mx-auto max-w-xl">
       <p className="text-sm text-ink-3">Getting started · step {Math.min(i + 1, steps.length)} of {steps.length}</p>
       {current === "children" && <ChildrenStep onNext={next} />}
+      {current === "letters" && <LettersStep ai={ai} onNext={next} onBreaks={() => setBreaksAdded(true)} />}
       {current === "holidays" && <HolidaysStep onNext={next} />}
       {current === "work" && <WorkStep onNext={next} />}
       {current === "calendar" && <CalendarStep onNext={next} />}
@@ -104,6 +116,26 @@ function ChildrenStep({ onNext }: { onNext: () => void }) {
       ))}
       <button className="self-start text-sm text-brand underline" onClick={() => setRows([...rows, { name: "", band: "5-7" }])}>+ Another child</button>
     </StepFrame>
+  );
+}
+
+/** The household desk, as the first way in: the dates come from the letters the family already gets. */
+function LettersStep({ ai, onNext, onBreaks }: { ai: boolean; onNext: () => void; onBreaks: () => void }) {
+  const [added, setAdded] = useState(0);
+  return (
+    <div>
+      <h1 className="mt-2 font-display text-3xl">Add your school letters</h1>
+      <p className="mt-2 text-ink-2">
+        Paste the school&apos;s term dates, a letter, a club timetable or a booking{ai ? ", or add a photo or PDF of one" : ""}. More picks out the dates and you check each one before anything goes in the diary. Do as many as you like now; the Household desk is always in the menu for the next one.
+      </p>
+      <div className="mt-4">
+        <DeskBoard ai={ai} embedded onAdded={(r) => { setAdded((n) => n + r.length); if (r.some((x) => x.targetType === "holiday")) onBreaks(); }} />
+      </div>
+      <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-line pt-4">
+        <Button variant="primary" onClick={onNext}>{added ? "Continue" : "Skip for now"}</Button>
+        {added > 0 && <span className="text-sm text-ink-2">{added === 1 ? "1 thing added" : `${added} things added`} so far.</span>}
+      </div>
+    </div>
   );
 }
 
