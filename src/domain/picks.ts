@@ -63,10 +63,12 @@ export function choosePicks(input: PickInput): Activity[] {
     .sort((x, y) => y.score - x.score);
   const out: Activity[] = [];
   // Different kinds of thing first: one cosy, one out, one active.
-  for (const { a } of scored) {
-    if (out.length >= input.count) break;
-    if (out.some((o) => o.category === a.category || (o.setting === a.setting && out.length < 2))) continue;
-    out.push(a);
+  // Each place is filled from the top of the list again, so an idea passed
+  // over only for its setting is still in the running for the third place.
+  while (out.length < input.count) {
+    const next = scored.find(({ a }) => !out.includes(a) && !out.some((o) => o.category === a.category || (o.setting === a.setting && out.length < 2)));
+    if (!next) break;
+    out.push(next.a);
   }
   for (const { a } of scored) {
     if (out.length >= input.count) break;

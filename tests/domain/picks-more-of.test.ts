@@ -32,3 +32,17 @@ describe("check-in wants shape the adult's own picks (integration brief)", () =>
     expect(choosePicks({ ...base, moreOf: ["couple time", "family time"] }).map((a) => a.key)).toEqual(plain);
   });
 });
+
+describe("picks stay varied", () => {
+  it("gives three different kinds of idea whenever the shelf has them, whatever the week's seed", () => {
+    // One adult's half of the For Us list (even seats), which has eight kinds of idea.
+    const shelf = CATALOGUE.filter((a) => a.kind === "us" && a.durationMinutes <= 720).filter((_, i) => i % 2 === 0);
+    expect(new Set(shelf.map((a) => a.category)).size).toBeGreaterThanOrEqual(3);
+    const narrow = [];
+    for (let n = 0; n < 500; n++) {
+      const out = choosePicks({ ...base, candidates: shelf, seed: `household-${n}:2030-10-06` });
+      if (new Set(out.map((a) => a.category)).size < 3) narrow.push(n);
+    }
+    expect(narrow).toEqual([]);
+  });
+});
