@@ -4,10 +4,12 @@ import { ArrowRight, Bell, CalendarPlus, Check, Heart, Inbox, ListChecks, MapPin
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import type { DecisionItem } from "@/domain/decisions";
 import type { JobsView } from "@/server/queries/jobs";
 import type { WeekView } from "@/server/queries/week";
 import { useApp, useNow } from "./app-context";
 import { CheckinDialog } from "./checkin-dialog";
+import { DecisionSummary } from "./decision-review";
 import { fmtDate, localParts, mondayOf, todayIn } from "./format";
 import { JobsToday } from "./jobs";
 import { MomentCard } from "./moment-card";
@@ -62,7 +64,7 @@ function whenLabel(m: { start: number }, today: string, tz: string): string {
   return `${fmtDate(date)} at ${time}`;
 }
 
-export function TodayView({ data, jobs, deskUsed = true }: { data: WeekView; jobs?: JobsView; deskUsed?: boolean }) {
+export function TodayView({ data, jobs, decisions, deskUsed = true }: { data: WeekView; jobs?: JobsView; decisions?: { items: DecisionItem[]; until: string }; deskUsed?: boolean }) {
   const app = useApp();
   const router = useRouter();
   const now = useNow();
@@ -91,6 +93,13 @@ export function TodayView({ data, jobs, deskUsed = true }: { data: WeekView; job
   const meHours = Math.round((agreed.filter((m) => m.momentKind === "me" && m.organiserId === app.me.id).reduce((s, m) => s + (m.end - m.start), 0) / 3_600_000) * 2) / 2;
   // Up next: the next agreed plan, or a pickup or club you're down for, whichever is sooner.
   const next = nextUp({ me: app.me.id, now, moments: agreed, events: data.events });
+  // Who has said yes to the next plan, so nobody needs to check.
+  const agreedBy = (key: string) => {
+    const m = agreed.find((x) => `m:${x.id}` === key);
+    if (!m || m.momentKind === "me") return null;
+    const names = m.participantIds.map((id) => (id === app.me.id ? "you" : app.nameOf(id)));
+    return names.length > 1 ? `Agreed by ${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : null;
+  };
   const jobsDue = jobs?.jobs.filter((j) => (j.status === "today" || j.status === "overdue") && j.ownerId === app.me.id).length ?? 0;
 
   const steps = [
@@ -139,6 +148,7 @@ export function TodayView({ data, jobs, deskUsed = true }: { data: WeekView; job
               <Link href="/week" className="group mt-2 block">
                 <p className="font-display text-[1.75rem] italic leading-tight">{next.title}</p>
                 <p className="mt-1 flex items-center gap-1 opacity-85">{next.start <= now ? `On now, until ${localParts(next.end, app.timeZone).time}` : whenLabel(next, today, app.timeZone)} <ArrowRight aria-hidden size={16} className="transition-transform group-hover:translate-x-0.5" /></p>
+                {next.kind === "moment" && agreedBy(next.key) && <p className="mt-1 text-sm opacity-85">{agreedBy(next.key)}</p>}
                 {(next.leaveBy || next.kind === "duty") && (
                   <p className="mt-1 text-sm opacity-85">
                     {next.leaveBy ? `Leave by ${localParts(next.leaveBy, app.timeZone).time}` : ""}
@@ -275,6 +285,8 @@ export function TodayView({ data, jobs, deskUsed = true }: { data: WeekView; job
           })}
         </ul>
       )}
+
+      {decisions && <DecisionSummary items={decisions.items} until={decisions.until} />}
 
       {jobs && <JobsToday data={jobs} />}
 

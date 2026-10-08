@@ -246,6 +246,12 @@ export interface WeekView {
   handoversAwaitingMe: HandoverAsk[];
   /** Care I've said I'll do that is still ahead: mine to keep, hand over or withdraw (R08). Only I see this list. */
   carePromisedByMe: ArrangementView[];
+  /**
+   * Care still ahead that is not settled: asked but not yet confirmed, or
+   * confirmed with a drop-off or collection nobody has agreed. Proposed care
+   * is never cover; this list is what the weekly review shows as waiting.
+   */
+  careOpen: ArrangementView[];
   expenses: ExpenseView[];
   money: { estimateMinor: number; committedMinor: number; netPaidMinor: number };
   attention: AttentionItem[];
@@ -614,6 +620,9 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
   }
   const careAwaitingMe = arrRows.map(arrangementView).filter((a) => a.awaitingMe);
   const carePromisedByMe = arrRows.map(arrangementView).filter((a) => a.canReview);
+  const careOpen = arrRows
+    .filter((a) => a.endAt.getTime() > now.getTime() && (a.state === "proposed" || (a.state === "confirmed" && ((a.dropOffBy && !a.dropOffAgreed) || (a.collectBy && !a.collectAgreed)))))
+    .map((a) => ({ ...arrangementView(a), note: "" }));
   const handoversAwaitingMe: HandoverAsk[] = arrRows
     .filter((a) => a.state !== "declined" && a.endAt.getTime() > now.getTime())
     .flatMap((a) => [
@@ -745,6 +754,7 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     careAwaitingMe,
     handoversAwaitingMe,
     carePromisedByMe,
+    careOpen,
     expenses: expensesOut,
     money,
     attention,

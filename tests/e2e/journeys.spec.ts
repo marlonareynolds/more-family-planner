@@ -418,3 +418,40 @@ test("a new household adds its first school letter during setup, and the desk st
   await go(alex, "/holidays");
   await expect(alex.getByText("Half term", { exact: true })).toBeVisible();
 });
+
+test("the weekly review shows a deadline with its own action and can finish with no new plans", async ({ browser }, info) => {
+  const tag = `${info.project.name}-r${Date.now().toString(36)}`;
+  const vp = info.project.name === "phone" ? { width: 412, height: 915 } : undefined;
+  const alex = await adult(browser, `Alex ${tag}`, vp);
+  await alex.getByLabel("Household name").fill(`Household ${tag}`);
+  await alex.getByRole("button", { name: "Start our household" }).click();
+  await alex.waitForURL(/\/welcome/);
+
+  // A one-off deadline, as the Desk would file it.
+  await go(alex, "/jobs");
+  await alex.getByRole("button", { name: "+ Add a job" }).click();
+  await alex.getByRole("textbox", { name: "Job", exact: true }).fill("Return the trip consent form");
+  await alex.getByLabel("How often").selectOption("once");
+  await alex.getByLabel("When").fill(inDays(1));
+  await alex.getByLabel("Due by (optional)").fill("12:00");
+  await alex.getByRole("button", { name: "Save" }).click();
+  await expect(alex.getByText("Return the trip consent form").first()).toBeVisible();
+
+  await go(alex, "/plan");
+  const review = alex.locator("#decisions");
+  await expect(review.getByText("Return the trip consent form: due by 12:00")).toBeVisible();
+  await expect(review.getByText(/Yours/)).toBeVisible();
+  await expect(review.getByRole("button", { name: "Not this week" })).toHaveCount(0);
+  await axe(alex);
+  await alex.screenshot({ path: `test-results/weekly-review-${info.project.name}.png`, fullPage: true });
+
+  // Pick nothing new and finish.
+  for (const radio of await alex.getByRole("radio", { name: "Not this week" }).all()) await radio.check({ force: true });
+  await alex.getByRole("button", { name: "Finish with no new plans" }).click();
+  await expect(alex.getByText(/No new plans this week/)).toBeVisible();
+
+  // Today points to the same decision.
+  await go(alex, "/today");
+  await expect(alex.getByText(/Decisions to make by/)).toBeVisible();
+  await expect(alex.getByText("1 for you")).toBeVisible();
+});
