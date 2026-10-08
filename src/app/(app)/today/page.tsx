@@ -6,7 +6,7 @@ import { deskItems } from "@/db/schema";
 import { loadRange } from "@/server/page-data";
 import { decisionsFor } from "@/server/queries/decisions";
 import { jobsFor } from "@/server/queries/jobs";
-import { mealsFor } from "@/server/queries/meals";
+import { easyDinnerOffers, mealsFor } from "@/server/queries/meals";
 import { reviewRange } from "@/server/queries/review-range";
 
 export const metadata = { title: "Today" };
@@ -22,7 +22,7 @@ export default async function TodayPage() {
   const [desk] = await db.select({ id: deskItems.id }).from(deskItems).where(eq(deskItems.householdId, household.id)).limit(1);
   return (
     <AppProvider value={infoFrom(view)}>
-      <TodayView data={view} jobs={jobs} decisions={decisions} deskUsed={!!desk} meals={meals} />
+      <TodayView data={view} jobs={jobs} decisions={decisions} deskUsed={!!desk} meals={meals} dinnerOffer={easyDinnerOffers(view, meals)[meals.today]} />
     </AppProvider>
   );
 }

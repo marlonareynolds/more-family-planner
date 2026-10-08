@@ -33,6 +33,7 @@ export const PRODUCT_EVENT_TYPES = [
   "weather_swap",
   "display_linked",
   "child_wish",
+  "plan_recovered",
 ] as const;
 export type ProductEventType = (typeof PRODUCT_EVENT_TYPES)[number];
 

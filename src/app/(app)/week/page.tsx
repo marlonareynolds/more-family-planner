@@ -8,7 +8,7 @@ import { currentActor } from "@/server/auth";
 import { loadWeek } from "@/server/page-data";
 import { balanceFor } from "@/server/queries/balance";
 import { freeTogetherIn } from "@/server/queries/free-time";
-import { mealsFor } from "@/server/queries/meals";
+import { easyDinnerOffers, mealsFor } from "@/server/queries/meals";
 
 export const metadata = { title: "Our Week" };
 
@@ -24,7 +24,7 @@ export default async function WeekPage(props: PageProps<"/week">) {
   return (
     <AppProvider value={infoFrom(week)}>
       <WeekBoard week={week} freeTogether={freeTogether} />
-      <DinnerPlanner data={meals} days={week.days} />
+      <DinnerPlanner data={meals} days={week.days} offers={easyDinnerOffers(week, meals)} />
       <ShoppingList lines={meals.shopping} />
       <BalanceCard balance={balance} />
     </AppProvider>

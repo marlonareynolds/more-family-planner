@@ -232,6 +232,11 @@ export interface WeekView {
     membershipRevision: number;
     scheduleRevision: number;
     version: number;
+    /** When family time usually ends, and the children's bedtime: suggestions only. */
+    eveningEnds: string;
+    bedtime: string | null;
+    /** The optional weekly guide for shared plans, in minor units; null when off. */
+    weeklyGuideMinor: number | null;
   };
   adults: Person[];
   children: { id: string; preferredName: string; ageBand: string; needs: string; version: number }[];
@@ -742,6 +747,9 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
       membershipRevision: household.membershipRevision,
       scheduleRevision: household.scheduleRevision,
       version: household.version,
+      eveningEnds: household.eveningEnds,
+      bedtime: household.bedtime,
+      weeklyGuideMinor: household.weeklyGuideMinor,
     },
     adults,
     children: kids,

@@ -21,7 +21,7 @@ import type { Tx } from "@/db/client";
 import { DomainError } from "@/domain/errors";
 import { isValidTimeZone } from "@/domain/time";
 import { defineCommand, assertVersion, type CommandContext } from "../pipeline";
-import { currentAdults, release, requiredText, shortText, supersedeDeliveries } from "./helpers";
+import { currentAdults, release, requiredText, shortText, supersedeDeliveries, timeString } from "./helpers";
 import { clearForecast } from "../weather";
 import { disconnectFeed } from "./calendars";
 import { endRitualRow } from "./rituals";
@@ -70,6 +70,35 @@ export const updateHousehold = defineCommand({
       .where(eq(households.id, ctx.household.id));
     if (p.timeZone !== ctx.household.timeZone) await ctx.bumpSchedule();
     await ctx.audit("household.update", "household", ctx.household.id);
+    return { householdId: ctx.household.id };
+  },
+});
+
+/**
+ * The household's own evening: when family time usually ends, and the
+ * children's usual bedtime. They shape suggestions only. A bedtime never
+ * counts as someone looking after the children.
+ */
+export const setEveningTimes = defineCommand({
+  name: "SetEveningTimes",
+  scope: "household",
+  payload: z.object({ eveningEnds: timeString, bedtime: timeString.nullable() }),
+  async handler(ctx, p) {
+    if (p.eveningEnds < "16:00") throw new DomainError("VALIDATION", "Family time ending before 16:00 leaves no evening to suggest.");
+    await ctx.tx.update(households).set({ eveningEnds: p.eveningEnds, bedtime: p.bedtime, version: sql`${households.version} + 1` }).where(eq(households.id, ctx.household.id));
+    await ctx.audit("household.evening", "household", ctx.household.id);
+    return { householdId: ctx.household.id };
+  },
+});
+
+/** An optional weekly guide for spending on shared plans: advice, never a block. Null turns it off. */
+export const setSpendingGuide = defineCommand({
+  name: "SetSpendingGuide",
+  scope: "household",
+  payload: z.object({ weeklyGuideMinor: z.number().int().min(0).max(10_000_000).nullable() }),
+  async handler(ctx, p) {
+    await ctx.tx.update(households).set({ weeklyGuideMinor: p.weeklyGuideMinor, version: sql`${households.version} + 1` }).where(eq(households.id, ctx.household.id));
+    await ctx.audit("household.guide", "household", ctx.household.id);
     return { householdId: ctx.household.id };
   },
 });

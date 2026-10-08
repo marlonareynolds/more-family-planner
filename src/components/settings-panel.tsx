@@ -69,6 +69,7 @@ export function SettingsPanel({
       <Profile profile={profile} />
       <ReachSettingsPanel settings={reach} />
       <HouseholdDetails household={household} />
+      <EveningsAndSpending household={household} />
       <TownSettings placeName={placeName} />
       <Adults openInvite={openInvite} />
       <Children kids={kids} />
@@ -145,6 +146,52 @@ function HouseholdDetails({ household }: { household: WeekView["household"] }) {
           </Field>
           <div className="flex items-center gap-3">
             <Button type="submit" variant="primary" disabled={pending}>Save</Button>
+            {saved && <span role="status" className="text-sm text-good">Saved</span>}
+          </div>
+        </form>
+      </Card>
+    </section>
+  );
+}
+
+/**
+ * The household's own evening and an optional spending guide. Both only
+ * shape suggestions and advice; neither books time or blocks a plan.
+ */
+function EveningsAndSpending({ household }: { household: WeekView["household"] }) {
+  const app = useApp();
+  const { run, pending, error } = useCommand(app.householdId);
+  const [ends, setEnds] = useState(household.eveningEnds);
+  const [bedtime, setBedtime] = useState(household.bedtime ?? "");
+  const [guide, setGuide] = useState(household.weeklyGuideMinor === null ? "" : String(household.weeklyGuideMinor / 100));
+  const [saved, setSaved] = useState(false);
+  return (
+    <section>
+      <SectionTitle>Evenings and spending</SectionTitle>
+      <Card>
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const pounds = guide.trim() === "" ? null : Math.round(Number(guide) * 100);
+            const ok = (await run("SetEveningTimes", { eveningEnds: ends, bedtime: bedtime || null }, { refresh: false })) && (await run("SetSpendingGuide", { weeklyGuideMinor: pounds !== null && Number.isFinite(pounds) ? pounds : null }));
+            setSaved(!!ok);
+          }}
+        >
+          <ErrorNote message={error?.message} />
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Family time usually ends" hint="On a school night. Family ideas aren't suggested after it.">
+              {(id, d) => <input id={id} aria-describedby={d} type="time" className={inputClass} value={ends} onChange={(e) => { setEnds(e.target.value); setSaved(false); }} />}
+            </Field>
+            <Field label="Children's bedtime (optional)" hint="Evenings for the two of you start after it. It never counts as someone looking after them.">
+              {(id, d) => <input id={id} aria-describedby={d} type="time" className={inputClass} value={bedtime} onChange={(e) => { setBedtime(e.target.value); setSaved(false); }} />}
+            </Field>
+          </div>
+          <Field label="Weekly guide for shared plans, £ (optional)" hint="Shown on Our Week next to the costs you've entered. It's a guide, not a limit, and private budgets are never counted in it.">
+            {(id, d) => <input id={id} aria-describedby={d} inputMode="decimal" className={`${inputClass} w-36`} value={guide} onChange={(e) => { setGuide(e.target.value.replace(/[^\d.]/g, "")); setSaved(false); }} />}
+          </Field>
+          <div className="flex items-center gap-3">
+            <Button type="submit" variant="primary" disabled={pending || !ends}>Save</Button>
             {saved && <span role="status" className="text-sm text-good">Saved</span>}
           </div>
         </form>

@@ -66,6 +66,15 @@ export const households = pgTable("households", {
   placeName: text("place_name"),
   latitude: doublePrecision("latitude"),
   longitude: doublePrecision("longitude"),
+  /** When family time usually ends on a school night ("HH:MM"). Shapes suggestions only. */
+  eveningEnds: text("evening_ends").notNull().default("19:30"),
+  /**
+   * The children's usual bedtime, if the household says. Evenings for the two
+   * of you are suggested after it; it never counts as anyone looking after them.
+   */
+  bedtime: text("bedtime"),
+  /** An optional weekly spending guide for shared plans: advice, never a limit. */
+  weeklyGuideMinor: money("weekly_guide_minor"),
   version: version(),
 });
 

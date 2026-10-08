@@ -26,6 +26,8 @@ export interface FreeTimeInput {
   childBusy: readonly Interval[];
   dayStart?: string;
   dayEnd?: string;
+  /** When the household says family time usually ends; 19:30 if they haven't said. */
+  familyDayEnd?: string;
   /** Only start between these local times ("HH:MM"), for ideas tied to a time of day. */
   startBetween?: readonly [string, string];
   /** Days most people are off work (bank holidays): treated like a weekend for long outings. */
@@ -84,7 +86,7 @@ export function suitability(kind: MomentKind, h: number, weekend: boolean): numb
 
 /** Half a day or more: a day out, not something to squeeze into a weekday evening. */
 export const LONG_OUTING_MINUTES = 240;
-/** Family time ends around the children's bedtime. */
+/** Family time ends around the children's bedtime, unless the household sets its own time. */
 const FAMILY_DAY_END = "19:30";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -107,7 +109,8 @@ export function suggestTimes(input: FreeTimeInput): SuggestedTime[] {
     const offDay = hours(localToInstantCompatible(`${date}T12:00`, tz), tz).weekend || !!input.dayOff?.(date);
     // A seaside day belongs on a weekend or holiday, starting in the morning.
     if (long && !offDay) continue;
-    const dayEnd = kind === "family" && (input.dayEnd ?? "22:30") > FAMILY_DAY_END ? FAMILY_DAY_END : (input.dayEnd ?? "22:30");
+    const familyEnd = input.familyDayEnd ?? FAMILY_DAY_END;
+    const dayEnd = kind === "family" && (input.dayEnd ?? "22:30") > familyEnd ? familyEnd : (input.dayEnd ?? "22:30");
     const dayWindow = {
       start: Math.max(firstStart, localToInstantCompatible(`${date}T${input.dayStart ?? "07:00"}`, tz)),
       end: localToInstantCompatible(`${date}T${dayEnd}`, tz),

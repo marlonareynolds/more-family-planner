@@ -8,6 +8,7 @@ import { addDaysStr, fmtDate, fmtMoney, fmtRange, localParts, todayIn } from "./
 import { EventEditor } from "./event-editor";
 import { MomentCard } from "./moment-card";
 import { MomentEditor, type MomentKind } from "./moment-editor";
+import { weekSpend } from "@/domain/money";
 import { Badge, Button, Dialog, Segmented, cx } from "./ui";
 import { WeatherGlyph, weatherText } from "./weather";
 
@@ -69,11 +70,7 @@ export function WeekBoard({ week, mode = "week", freeTogether = {} }: { week: We
           {week.calendars.some((c) => c.stale && c.mine) && <Link className="underline" href="/settings#calendars">Check it</Link>}
         </p>
       )}
-      {mode === "week" && week.money.estimateMinor + week.money.netPaidMinor > 0 && (
-        <p className="mb-4 text-sm text-ink-2">
-          This week&apos;s plans: expected {fmtMoney(week.money.estimateMinor)}, committed {fmtMoney(week.money.committedMinor)}, paid {fmtMoney(week.money.netPaidMinor)}
-        </p>
-      )}
+      {mode === "week" && <WeekSpendLine week={week} />}
 
       {mode === "week" && week.days.every((d) => (days.get(d) ?? []).length === 0) && (
         <Link href="/plan" className="rise group mb-4 flex items-center gap-3 rounded-2xl bg-brand-soft px-4 py-3 text-brand">
@@ -211,6 +208,38 @@ function CareRow({ g, date }: { g: WeekView["care"][number]["groups"][number]; d
         <p className="text-sm text-warn">Not covered {g.gaps.map((x) => fmtRange(x.start, x.end, app.timeZone)).join(", ")}</p>
       )}
     </Link>
+  );
+}
+
+/**
+ * The week's shared costs, each counted once at its firmest figure, beside
+ * the household's guide if it has one. Plans with no cost entered are
+ * counted as unknown, never as free; private budgets and hidden surprises
+ * are not in these figures.
+ */
+function WeekSpendLine({ week }: { week: WeekView }) {
+  const s = weekSpend(week.expenses);
+  const guide = week.household.weeklyGuideMinor;
+  const noCost = week.moments.filter((m) => (m.lifecycle === "planned" || m.lifecycle === "completed") && m.momentKind !== "me" && !m.detailsHidden && !m.expenseId).length;
+  const unknown = noCost + s.unknownCosts;
+  if (s.knownMinor === 0 && guide === null) return null;
+  const parts = [
+    s.paidMinor ? `${fmtMoney(s.paidMinor)} paid` : null,
+    s.toPayMinor ? `${fmtMoney(s.toPayMinor)} still to pay` : null,
+    s.estimatedMinor ? `about ${fmtMoney(s.estimatedMinor)} estimated` : null,
+  ].filter(Boolean);
+  const over = guide !== null && s.knownMinor > guide;
+  return (
+    <div className="mb-4 rounded-2xl bg-surface-2 px-4 py-3 text-sm text-ink-2">
+      <p>
+        <span className="font-medium text-ink">This week&apos;s shared plans: {fmtMoney(s.knownMinor)} known</span>
+        {guide !== null && <> of your {fmtMoney(guide)} guide</>}
+        {parts.length > 0 && <> ({parts.join(", ")})</>}
+      </p>
+      {unknown > 0 && <p>{unknown} plan{unknown === 1 ? " has" : "s have"} no cost entered yet, so the total isn&apos;t complete. Unknown isn&apos;t the same as free.</p>}
+      {over && <p>That&apos;s above your guide. <Link className="text-brand underline" href="/family">Free and at-home ideas</Link></p>}
+      <p className="text-xs text-ink-3">Only costs entered on plans you both see. Private budgets aren&apos;t included.</p>
+    </div>
   );
 }
 

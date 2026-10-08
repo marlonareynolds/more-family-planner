@@ -6,7 +6,7 @@ import { plansWith, whenPhrase } from "@/domain/discreet";
 import { DomainError } from "@/domain/errors";
 import { hiddenReason, isAgreed, materialChanges, type AcceptanceRecord, type MomentFields } from "@/domain/moments";
 import { instantToLocalDate, isWeekKey } from "@/domain/time";
-import { defineCommand, assertVersion, type CommandContext } from "../pipeline";
+import { defineCommand, assertVersion, type CommandContext, type HouseholdCommand } from "../pipeline";
 import { loadBusy } from "../queries/busy";
 import { arrangeCare } from "./care";
 import {
@@ -273,6 +273,47 @@ export const editMoment = defineCommand({
 });
 
 /**
+ * Recovery: move a plan to another time chosen from fresh free times. The
+ * new time is checked again against everyone's diary at the moment of
+ * saving, and it is an ordinary material change, so anyone else in the plan
+ * is asked again: an agreed plan is never moved for someone.
+ */
+export const moveMoment = defineCommand({
+  name: "MoveMoment",
+  scope: "household",
+  payload: z.object({ momentId: z.uuid(), version: z.number().int(), span: spanSchema }),
+  async handler(ctx, p) {
+    const m = await loadMoment(ctx, p.momentId);
+    if (m.kind === "us" && m.organiserId !== ctx.actor.accountId) throw new DomainError("VALIDATION", "Plans for the two of you are changed by whoever made them.");
+    const res = await (editMoment as HouseholdCommand<z.infer<typeof editMoment.payload>, { momentId: string; version: number; materialVersion: number }>).handler(ctx, {
+      momentId: m.id,
+      version: p.version,
+      fields: {
+        title: m.title,
+        notes: m.notes,
+        location: m.location,
+        activityKey: m.activityKey,
+        span: p.span,
+        participantIds: m.participantIds,
+        childIds: m.childIds,
+        needsCare: m.needsCare,
+        budgetMinor: m.budgetMinor,
+        travelBeforeMinutes: m.travelBeforeMinutes,
+        travelAfterMinutes: m.travelAfterMinutes,
+        surprise: m.surprise,
+        chosenByChildId: m.chosenByChildId,
+      },
+    });
+    const moved = await loadMoment(ctx, m.id);
+    if (moved.startAt.getTime() <= ctx.now.getTime()) throw new DomainError("VALIDATION", "Pick a time that hasn't started yet.");
+    await assertFree(ctx, moved);
+    await ctx.audit("moment.move", "moment", m.id);
+    await ctx.track("plan_recovered", "moved");
+    return res;
+  },
+});
+
+/**
  * Swap what a plan is, keeping its time, people and care: the wet-weather
  * swap. Not a material change, so nobody has to agree again; the others are
  * told what it changed to.
@@ -286,7 +327,7 @@ export const swapActivity = defineCommand({
     title: requiredText(120, "A title"),
     activityKey: z.string().max(80).nullable(),
     location: shortText(200).default(""),
-    reason: z.enum(["weather"]).default("weather"),
+    reason: z.enum(["weather", "simpler"]).default("weather"),
   }),
   async handler(ctx, p) {
     const m = await loadMoment(ctx, p.momentId);
@@ -304,7 +345,7 @@ export const swapActivity = defineCommand({
         await queueNotification(ctx, {
           recipientId: other,
           kind: "moment.swapped",
-          text: `${ctx.actor.displayName} swapped ${m.title} for ${p.title}, as rain is likely.`,
+          text: p.reason === "simpler" ? `${ctx.actor.displayName} kept the time and made it simpler: ${p.title} instead of ${m.title}.` : `${ctx.actor.displayName} swapped ${m.title} for ${p.title}, as rain is likely.`,
           sourceType: "moment",
           sourceId: m.id,
           sourceVersion: updated.materialVersion,
@@ -313,7 +354,7 @@ export const swapActivity = defineCommand({
     }
     await ctx.bumpSchedule();
     await ctx.audit("moment.swap", "moment", m.id);
-    await ctx.track("weather_swap", m.kind);
+    await ctx.track(p.reason === "simpler" ? "plan_recovered" : "weather_swap", p.reason === "simpler" ? "simpler" : m.kind);
     return { momentId: m.id, version: updated.version };
   },
 });
