@@ -772,6 +772,10 @@ export const trialResponses = pgTable(
     minutesOutside: smallint("minutes_outside"),
     /** 1 (not at all) to 5 (completely). */
     fairlyAgreed: smallint("fairly_agreed"),
+    /** 1 (not at all) to 5 (a lot): did More help this adult get time that restored them? */
+    restoredTime: smallint("restored_time"),
+    /** 1 (no less) to 5 (much less): did they feel less responsible for remembering and chasing? */
+    lessToCarry: smallint("less_to_carry"),
     continueChoice: text("continue_choice", { enum: ["yes", "unsure", "no"] }),
     helped: text("helped").notNull().default(""),
     friction: text("friction").notNull().default(""),
