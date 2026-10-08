@@ -131,7 +131,7 @@ function byHand(t: DeskTarget, pickup: boolean): string {
  * is already in the diary, so nothing goes in twice. One tap adds the lot in
  * one go, through the same commands as the hand-made versions.
  */
-export function DeskBoard({ ai = false }: { ai?: boolean }) {
+export function DeskBoard({ ai = false, embedded = false, onAdded }: { ai?: boolean; embedded?: boolean; onAdded?: (added: { targetType: string }[]) => void }) {
   const app = useApp();
   const router = useRouter();
   const { run, pending, error } = useCommand(app.householdId);
@@ -254,7 +254,7 @@ export function DeskBoard({ ai = false }: { ai?: boolean }) {
           collectAt: f.collectAt ?? null,
         };
       });
-    const result = await run<{ results: { ref: string; outcome: "added" | "updated" | "already"; by?: string }[] }>("ImportDeskItems", { items }, { expected: { membershipRevision: app.membershipRevision }, refresh: false });
+    const result = await run<{ results: { ref: string; outcome: "added" | "updated" | "already"; targetType: string; by?: string }[] }>("ImportDeskItems", { items }, { expected: { membershipRevision: app.membershipRevision }, refresh: false });
     // Nothing was added; the cards stay as the person left them, and the one that stopped it says so.
     if (!result) return;
     setDrafts((ds) => ds?.map((d) => {
@@ -265,6 +265,7 @@ export function DeskBoard({ ai = false }: { ai?: boolean }) {
     const already = result.results.filter((r) => r.outcome === "already").length;
     if (added) toast(added === 1 ? "Added to the diary." : `${added} things added to the diary.`, { celebrate: true });
     if (already) toast(already === 1 ? "One was already in the diary, so it wasn't added again." : `${already} were already in the diary, so they weren't added again.`);
+    onAdded?.(result.results.filter((r) => r.outcome !== "already"));
     router.refresh();
   }
 
@@ -280,10 +281,15 @@ export function DeskBoard({ ai = false }: { ai?: boolean }) {
 
   return (
     <div>
-      <h1 className="font-display text-3xl">Household desk</h1>
-      <p className="mt-1 max-w-prose text-ink-2">
-        {ai ? "Paste a school letter, a booking or an invitation, or add a photo or PDF of one." : "Paste a school letter, a booking confirmation or an invitation."} More picks out the dates and suggests what to add. You check each one; nothing goes in the diary until you tap Add.
-      </p>
+      {/* In Getting started, the step supplies its own heading and words. */}
+      {!embedded && (
+        <>
+          <h1 className="font-display text-3xl">Household desk</h1>
+          <p className="mt-1 max-w-prose text-ink-2">
+            {ai ? "Paste a school letter, a booking or an invitation, or add a photo or PDF of one." : "Paste a school letter, a booking confirmation or an invitation."} More picks out the dates and suggests what to add. You check each one; nothing goes in the diary until you tap Add.
+          </p>
+        </>
+      )}
       <p className="mt-2 flex max-w-prose items-start gap-2 text-sm text-ink-3">
         <Lock aria-hidden size={16} className="mt-0.5 shrink-0" />
         {ai ? (

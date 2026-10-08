@@ -29,15 +29,17 @@ try {
   const ev = await q<{ t: string; n: number; hh: number }>(sql`select event_type as t, count(*)::int as n, count(distinct household_id)::int as hh
     from product_events where occurred_at > ${since} and event_type <> 'active_day' group by 1 order by 1`);
   for (const e of ev) console.log(`  ${e.t}: ${e.n} across ${e.hh} households`);
-  const r = await q<{ week: string; answered: number; shared: number; worthwhile: number | null; minutes: number | null; fair: number | null; keep: number | null }>(sql`
+  const r = await q<{ week: string; answered: number; shared: number; worthwhile: number | null; minutes: number | null; fair: number | null; restored: number | null; carry: number | null; keep: number | null }>(sql`
     select week_key::text as week, count(*)::int as answered, count(*) filter (where share_with_trial)::int as shared,
       round(avg(coalesce(me_moments,0)+coalesce(us_moments,0)+coalesce(family_moments,0)) filter (where share_with_trial), 1)::float as worthwhile,
       round(avg(coalesce(minutes_in_app,0)+coalesce(minutes_outside,0)) filter (where share_with_trial))::float as minutes,
       round(avg(fairly_agreed) filter (where share_with_trial), 1)::float as fair,
+      round(avg(restored_time) filter (where share_with_trial), 1)::float as restored,
+      round(avg(less_to_carry) filter (where share_with_trial), 1)::float as carry,
       (count(*) filter (where share_with_trial and continue_choice = 'yes'))::int as keep
     from trial_responses where week_key > (now() - make_interval(days => ${days}))::date group by 1 order by 1`);
   console.log("Weekly trial answers (averages from shared answers only):");
-  for (const w of r) console.log(`  ${w.week}: ${w.answered} answered, ${w.shared} shared; moments ${w.worthwhile ?? "–"}, organising ${w.minutes ?? "–"} min, fairness ${w.fair ?? "–"}/5, would continue ${w.keep}/${w.shared}`);
+  for (const w of r) console.log(`  ${w.week}: ${w.answered} answered, ${w.shared} shared; moments ${w.worthwhile ?? "–"}, organising ${w.minutes ?? "–"} min, fairness ${w.fair ?? "–"}/5, restoring time ${w.restored ?? "–"}/5, less to remember ${w.carry ?? "–"}/5, would continue ${w.keep}/${w.shared}`);
 } finally {
   await client.end();
 }
