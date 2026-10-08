@@ -17,5 +17,6 @@ import "./trips";
 import "./display";
 import "./needs";
 import "./account";
+import "./desk";
 
 export { executeCommand, commandNames } from "../pipeline";

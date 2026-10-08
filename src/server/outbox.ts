@@ -90,29 +90,38 @@ export async function processOutbox(db: Db, now = new Date(), limit = 50): Promi
 
     for (const job of jobs) {
       try {
-        if (job.eventType === "notify") {
-          const p = job.payload as NotifyPayload;
-          if (await stillRelevant(tx as unknown as Db, p, now)) {
-            await tx
-              .insert(notifications)
-              .values({
-                accountId: p.recipientId,
-                householdId: p.householdId,
-                kind: p.kind,
-                text: p.text,
-                sourceType: p.sourceType,
-                sourceId: p.sourceId,
-                dedupeKey: job.dedupeKey,
-                relevance: p,
-                pushExpiresAt: typeof p.expiresAt === "number" ? new Date(p.expiresAt) : null,
-              })
-              .onConflictDoNothing({ target: notifications.dedupeKey });
-            stats.delivered++;
-          } else {
-            stats.skipped++;
+        // Each job runs in its own savepoint: one job's database error rolls
+        // back that job alone, so the rest of the batch is still delivered
+        // and the failure is still recorded below.
+        const outcome = await tx.transaction(async (sp) => {
+          let result: "delivered" | "skipped" | "none" = "none";
+          if (job.eventType === "notify") {
+            const p = job.payload as NotifyPayload;
+            if (await stillRelevant(sp as unknown as Db, p, now)) {
+              await sp
+                .insert(notifications)
+                .values({
+                  accountId: p.recipientId,
+                  householdId: p.householdId,
+                  kind: p.kind,
+                  text: p.text,
+                  sourceType: p.sourceType,
+                  sourceId: p.sourceId,
+                  dedupeKey: job.dedupeKey,
+                  relevance: p,
+                  pushExpiresAt: typeof p.expiresAt === "number" ? new Date(p.expiresAt) : null,
+                })
+                .onConflictDoNothing({ target: notifications.dedupeKey });
+              result = "delivered";
+            } else {
+              result = "skipped";
+            }
           }
-        }
-        await tx.update(outbox).set({ state: "done", processedAt: now, attempts: sql`${outbox.attempts} + 1` }).where(eq(outbox.id, job.id));
+          await sp.update(outbox).set({ state: "done", processedAt: now, attempts: sql`${outbox.attempts} + 1` }).where(eq(outbox.id, job.id));
+          return result;
+        });
+        if (outcome === "delivered") stats.delivered++;
+        if (outcome === "skipped") stats.skipped++;
       } catch (err) {
         stats.failed++;
         await tx

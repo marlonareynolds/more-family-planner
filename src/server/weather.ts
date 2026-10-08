@@ -2,6 +2,7 @@ import { and, eq, gt, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
 import type { Db, DbOrTx } from "@/db/client";
 import { households, moments, outbox, weatherForecasts } from "@/db/schema";
 import { whenPhrase } from "@/domain/discreet";
+import { hiddenReason } from "@/domain/moments";
 import { isWet, rainDuring, type HourPoint } from "@/domain/weather";
 import { CATALOGUE, type Activity } from "@/lib/catalogue";
 import { placeAsActivity, placeKey, type PlaceView } from "@/lib/places";
@@ -115,6 +116,8 @@ export async function queueWeatherSwaps(db: Db, now = new Date()): Promise<{ que
     if (!hours || !isWet(rainDuring(hours, m.startAt.getTime(), m.endAt.getTime()))) continue;
     const when = whenPhrase(m.startAt.getTime(), now.getTime(), tz);
     for (const recipientId of m.participantIds) {
+      // Someone being surprised hears nothing that would give the plan away.
+      if (hiddenReason(m, recipientId)) continue;
       const text = m.kind === "me" ? `Rain is likely for your time ${when}. There's an indoor option ready in More.` : `Rain is likely for ${m.title} ${when}. There's an indoor swap ready in More.`;
       const r = await db
         .insert(outbox)

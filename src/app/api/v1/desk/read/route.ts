@@ -15,8 +15,8 @@ export async function POST(req: Request) {
     assertRate(`desk-ai:${actor.accountId}`, 30, 3_600_000);
     const parsed = deskInput.safeParse(await req.json().catch(() => null));
     if (!parsed.success) throw new DomainError("VALIDATION", "That file is too large or not a photo or PDF.");
-    const items = await readWithAi(await getDb(), actor, parsed.data);
-    return Response.json({ items }, { headers: noStore });
+    const { items, unreadable } = await readWithAi(await getDb(), actor, parsed.data);
+    return Response.json({ items, unreadable }, { headers: noStore });
   } catch (err) {
     return errorResponse(err);
   }

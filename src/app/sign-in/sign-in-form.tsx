@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import { Button, ErrorNote, Field, inputClass } from "@/components/ui";
+import { safeNextPath } from "@/lib/safe-next";
 
 export function SignInForm({ mode, next }: { mode: "dev" | "supabase"; next: string }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/today";
+  const safeNext = safeNextPath(next);
 
   async function devSignIn(n: string) {
     setError(null);

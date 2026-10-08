@@ -133,3 +133,20 @@ export function hiddenReason(
   if (m.surprise && m.lifecycle !== "completed") return "surprise";
   return null;
 }
+
+/**
+ * The privacy split for surprises and Me time (Marlon's review, 2026-10-08).
+ * Private to the organiser: title, notes, place, activity, preparation tasks,
+ * highlights and the planned spending limit. Shared, so the other adult can
+ * agree knowingly: when and how long (as busy), who is busy, which children
+ * are involved, whether care is needed and who covers it, and money actually
+ * recorded, under the label below.
+ */
+export function withheldFromOthers(m: { kind: MomentKind; surprise: boolean; lifecycle: Lifecycle }): boolean {
+  return (m.kind === "me" && ME_TIME_PARTNER_VIEW === "busy") || (m.surprise && m.lifecycle !== "completed");
+}
+
+/** The label another adult sees in place of a withheld title. */
+export function withheldLabel(reason: "surprise" | "me_time"): string {
+  return reason === "surprise" ? "Surprise plan" : "Time for themselves";
+}

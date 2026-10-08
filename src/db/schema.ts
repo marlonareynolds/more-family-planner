@@ -802,6 +802,11 @@ export const jobs = pgTable(
     startsOn: date("starts_on").notNull(),
     /** Remind the evening before (bins), not the morning of. */
     remindDayBefore: boolean("remind_day_before").notNull().default(false),
+    /** For a one-off with a precise cut-off ("by 12 noon"): HH:MM local, or null for any time that day. */
+    dueTime: text("due_time"),
+    /** The diary item this job is for (a trip's payment, a consent form). */
+    forType: text("for_type", { enum: ["event", "trip"] }),
+    forId: uuid("for_id"),
     /** A rough guess at the time it takes, for the "who carries what" view. */
     minutes: smallint("minutes").notNull().default(15),
     ownerId: uuid("owner_id").references(() => accounts.id),
@@ -813,6 +818,36 @@ export const jobs = pgTable(
     version: version(),
   },
   (t) => [index("jobs_household").on(t.householdId)],
+);
+
+/**
+ * What the Household Desk has already put in the diary, so the same notice
+ * read twice, or by both adults, is recognised by the server rather than by
+ * a similar title. Keys are hashes: no letter text is kept.
+ * `identityKey`: kind, title, children and first date (two sessions, or two
+ * siblings' photos, stay distinct). `detailKey`: the identity plus times,
+ * dates, place and details, so a changed notice is told apart from a repeat.
+ */
+export const deskItems = pgTable(
+  "desk_items",
+  {
+    id: id(),
+    householdId: uuid("household_id").notNull().references(() => households.id),
+    identityKey: text("identity_key").notNull(),
+    /** Kind, title and children without the date, to spot a notice that moved. */
+    seriesKey: text("series_key").notNull(),
+    detailKey: text("detail_key").notNull(),
+    targetType: text("target_type", { enum: ["event", "trip", "holiday", "job"] }).notNull(),
+    targetId: uuid("target_id").notNull(),
+    /** When it was for, to describe a moved notice ("was Fri 16 Oct"). */
+    startDate: date("start_date").notNull(),
+    /** Only its adder sees a "just for me" item, here as everywhere. */
+    privateTo: uuid("private_to").references(() => accounts.id),
+    createdBy: uuid("created_by").notNull().references(() => accounts.id),
+    createdAt: created(),
+    updatedAt: ts("updated_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("desk_items_identity").on(t.householdId, t.identityKey), index("desk_items_series").on(t.householdId, t.seriesKey)],
 );
 
 /** One due date of a job marked done. */

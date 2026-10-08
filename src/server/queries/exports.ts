@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { hiddenReason } from "@/domain/moments";
+import { hiddenReason, withheldLabel } from "@/domain/moments";
 import {
   accounts,
   careArrangements,
@@ -83,7 +83,16 @@ export async function exportHousehold(db: Db, actor: Actor) {
   const visibleMomentIds = new Set(ms.map((m) => m.id));
   const hl = ms.length ? await db.select().from(highlights).where(inArray(highlights.momentId, ms.map((m) => m.id))) : [];
   const names = new Map((await db.select({ id: accounts.id, name: accounts.displayName }).from(accounts).where(inArray(accounts.id, [...new Set(hl.map((h) => h.accountId))].concat(viewer)))).map((a) => [a.id, a.name]));
-  const visibleExpenses = ex.filter((e) => e.sourceType !== "moment" || !e.sourceId || visibleMomentIds.has(e.sourceId));
+  const hiddenOf = (m: (typeof ms)[number]) => hiddenReason(m, viewer);
+  const hiddenById = new Map(ms.map((m) => [m.id, hiddenOf(m)]));
+  // A cost on a surprise or Me time counts in the household's money, under a
+  // plain label, never the plan's own title.
+  const visibleExpenses = ex
+    .filter((e) => e.sourceType !== "moment" || !e.sourceId || visibleMomentIds.has(e.sourceId))
+    .map((e) => {
+      const reason = e.sourceType === "moment" && e.sourceId ? hiddenById.get(e.sourceId) : null;
+      return reason ? { ...e, label: withheldLabel(reason) } : e;
+    });
   return {
     kind: "household",
     exportedAt: new Date().toISOString(),
@@ -105,11 +114,12 @@ export async function exportHousehold(db: Db, actor: Actor) {
     })),
     moments: ms.map((m) => ({
       kind: m.kind,
-      title: hiddenReason(m, viewer) === "me_time" ? "Time for themselves" : hiddenReason(m, viewer) ? "Surprise" : m.title,
+      title: hiddenOf(m) ? withheldLabel(hiddenOf(m)!) : m.title,
       start: m.startAt,
       end: m.endAt,
       lifecycle: m.lifecycle,
-      budgetMinor: m.budgetMinor,
+      // The same split as the week view: the planned limit is private, real costs are shared.
+      budgetMinor: hiddenOf(m) ? null : m.budgetMinor,
       // The family's memories: shared highlights from plans this adult was part of.
       highlights:
         !hiddenReason(m, viewer) && (m.participantIds.includes(viewer) || m.kind === "family")

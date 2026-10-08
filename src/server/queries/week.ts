@@ -31,7 +31,7 @@ import { whenPhrase } from "@/domain/discreet";
 import { DomainError } from "@/domain/errors";
 import type { Interval } from "@/domain/intervals";
 import { summarise, type ExpenseSummary } from "@/domain/money";
-import { hiddenReason, isAgreed, latestDecision, readiness, stageLabel, type Decision, type ReadinessGap } from "@/domain/moments";
+import { hiddenReason, withheldLabel, isAgreed, latestDecision, readiness, stageLabel, type Decision, type ReadinessGap } from "@/domain/moments";
 import { addDays, instantToLocalDate, isWeekKey, startOfLocalDate, weekKeyFor } from "@/domain/time";
 import type { Actor } from "../auth";
 import type { PlaceView } from "@/lib/places";
@@ -299,7 +299,7 @@ export interface TripView {
 
 function hiddenLabel(m: MomentView | undefined): string | null {
   if (!m?.detailsHidden) return null;
-  return m.surpriseHidden ? "Surprise plan" : "Time for themselves";
+  return withheldLabel(m.surpriseHidden ? "surprise" : "me_time");
 }
 
 export async function householdFor(db: Db, actor: Actor) {
@@ -555,7 +555,8 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
       participantIds: m.participantIds,
       childIds: m.childIds,
       needsCare: m.needsCare,
-      budgetMinor: m.budgetMinor,
+      // The planned limit is part of the plan; real costs are shared below.
+      budgetMinor: hidden ? null : m.budgetMinor,
       surprise: m.surprise,
       surpriseHidden,
       detailsHidden: hidden !== null,

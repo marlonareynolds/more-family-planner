@@ -2,9 +2,10 @@ import { and, eq, gte, isNull } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { jobDone, jobs } from "@/db/schema";
 import { jobCadenceLabel, jobStatus, monthlyMinutes, type JobCadence, type JobStatus } from "@/domain/jobs";
-import { addDays, instantToLocalDate } from "@/domain/time";
+import { addDays, instantToLocal, instantToLocalDate } from "@/domain/time";
 import type { Actor } from "../auth";
 import { currentAdults } from "../commands/helpers";
+import { linkedTitles } from "../linked";
 import { householdFor } from "./week";
 
 export interface JobView {
@@ -24,6 +25,10 @@ export interface JobView {
   awaitingMyAnswer: boolean;
   status: JobStatus;
   dueOn: string | null;
+  /** A precise cut-off on the due day ("12:00" for "by noon"). */
+  dueTime: string | null;
+  /** The diary item it is for, if the viewer may see it ("Year 4 Trip to the Science Museum"). */
+  forTitle: string | null;
   /** Who did the most recent due date, if it's done. */
   lastDoneBy: string | null;
   lastDoneOn: string | null;
@@ -55,10 +60,22 @@ export async function jobsFor(db: Db, actor: Actor, now = new Date()): Promise<J
   const done = await db.select().from(jobDone).where(and(eq(jobDone.householdId, household.id), gte(jobDone.dueOn, addDays(today, -400))));
   const doneBy = new Map(done.map((d) => [`${d.jobId}:${d.dueOn}`, d.doneBy]));
 
+  // What each job is for, shown only where the viewer can see that item.
+  const forTitles = await linkedTitles(
+    db,
+    household.id,
+    actor.accountId,
+    rows.flatMap((j) => (j.forType && j.forId ? [{ type: j.forType, id: j.forId }] : [])),
+  );
+  const nowClock = instantToLocal(now.getTime(), household.timeZone).toPlainTime().toString().slice(0, 5);
+
   const order: Record<JobStatus, number> = { overdue: 0, today: 1, upcoming: 2, done: 3 };
   const out: JobView[] = rows.map((j) => {
     const doneSet = new Set(done.filter((d) => d.jobId === j.id).map((d) => d.dueOn));
-    const { status, dueOn } = jobStatus(j, today, doneSet);
+    const due = jobStatus(j, today, doneSet);
+    // "By 12 noon": past the cut-off on the day, it is overdue.
+    const status: JobStatus = due.status === "today" && j.dueTime && nowClock > j.dueTime ? "overdue" : due.status;
+    const dueOn = due.dueOn;
     const recent = [...doneSet].filter((d) => d <= today).sort().at(-1) ?? null;
     return {
       id: j.id,
@@ -76,6 +93,8 @@ export async function jobsFor(db: Db, actor: Actor, now = new Date()): Promise<J
       awaitingMyAnswer: j.proposedOwnerId === actor.accountId,
       status,
       dueOn,
+      dueTime: j.dueTime,
+      forTitle: j.forId ? (forTitles.get(j.forId) ?? null) : null,
       lastDoneBy: recent ? name(doneBy.get(`${j.id}:${recent}`) ?? null) : null,
       lastDoneOn: recent,
       version: j.version,
