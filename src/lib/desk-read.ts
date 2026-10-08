@@ -42,6 +42,8 @@ export interface Proposal {
   dateCertain: boolean;
   /** Changes the usual drop-off or collection (an early finish, a late start). */
   pickupChange: boolean;
+  /** For a pickup change: when the children must be collected ("closes at 1.30pm" is 13:30). */
+  collectAt: string | null;
   /** For a deadline: the title of the event it belongs to. */
   forItem: string | null;
 }
@@ -450,10 +452,11 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
   const out: (Proposal & { section: number; explicitEnd: boolean; sessions: number })[] = [];
   const headingUsed = new Set<number>();
 
-  type Pushed = Omit<Proposal, "key" | "childIds" | "past" | "endStated" | "arriveBy" | "location" | "details" | "repeat" | "repeatUntil" | "forWhom" | "dateCertain" | "pickupChange" | "forItem"> & {
+  type Pushed = Omit<Proposal, "key" | "childIds" | "past" | "endStated" | "arriveBy" | "location" | "details" | "repeat" | "repeatUntil" | "forWhom" | "dateCertain" | "pickupChange" | "collectAt" | "forItem"> & {
     section: number;
     explicitEnd: boolean;
     pickupChange?: boolean;
+    collectAt?: string | null;
   };
   const push = (p: Pushed, sentence: string) => {
     const lineChildren = childrenIn(sentence, ctx.children);
@@ -468,10 +471,12 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
       forWhom: sentence.match(FOR_WHOM)?.[0] ?? null,
       dateCertain: true,
       pickupChange: p.pickupChange ?? false,
+      collectAt: p.pickupChange ? (p.collectAt ?? null) : null,
       forItem: null,
       key: "",
       sessions: 0,
-      childIds: lineChildren.length ? lineChildren : p.kind === "holiday" ? (letterChildren.length ? letterChildren : ctx.children.map((c) => c.id)) : letterChildren,
+      // A break that names no child covers an only child; with more than one, the card asks which.
+      childIds: lineChildren.length ? lineChildren : p.kind === "holiday" ? (letterChildren.length ? letterChildren : ctx.children.length === 1 ? [ctx.children[0].id] : []) : letterChildren,
       source: sentence.length > 240 ? `${sentence.slice(0, 239)}…` : sentence,
       past: p.endDate < ctx.today,
     });
@@ -600,6 +605,7 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
           section: s.section,
           explicitEnd,
           pickupChange: earlyClose || endsAt || (optional && CLOSING.test(line) && times.length > 0),
+          collectAt: times[0]?.time ?? null,
         },
         line,
       );
@@ -655,6 +661,7 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
       forWhom: p.forWhom,
       dateCertain: p.dateCertain,
       pickupChange: p.pickupChange,
+      collectAt: p.collectAt,
       forItem: p.forItem,
       key: `p${i}`,
     }));

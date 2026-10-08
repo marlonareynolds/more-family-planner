@@ -116,6 +116,8 @@ const item = z.object({
   dateCertain: z.boolean(),
   /** Changes the usual drop-off or collection: an early finish, a late start, a different pick-up place or time. */
   pickupChange: z.boolean(),
+  /** For a pickup change: the new collection time ("school closes at 1:30pm" is 13:30), or null. */
+  collectAt: z.string().nullable(),
   /** For a deadline: the title of the event it belongs to, if it belongs to one. */
   forItem: z.string().nullable(),
   quote: z.string(),
@@ -145,6 +147,7 @@ Rules:
 - Do not invent anything. If a date is ambiguous ("next Friday" with no letter date, "the 3rd" with no month), still return the item with your best reading and dateCertain false, so the parent can check it; never drop it silently.
 - location: the place, in the letter's words ("Science Museum", "Jump Zone, Guildford", "the school hall"), or null.
 - details: what a parent must bring, wear, pay or do for it, in a short line in the letter's words ("Packed lunch, waterproof coat, £3 on ParentPay"), or null. Keep payment amounts and how to pay.
+- collectAt: for a pickup change, the time the children must be collected (an early finish's closing time), or null.
 - forWhom: who it is for as the letter says (a child's name, a class or year group), or null if it is for everyone.
 - forItem: for a deadline, the exact title of the event item it belongs to ("Year 4 Trip to the Science Museum" for its payment and consent deadlines), or null.
 - "quote" is the sentence from the letter that the item comes from, copied exactly.
@@ -194,9 +197,19 @@ export async function settle(db: Db, requestId: string, actualPence: number | nu
     .where(eq(usageReservations.requestId, requestId));
 }
 
-export type ReadFn = (input: DeskInput) => Promise<{ items: AiItem[]; usage: ReadUsage }>;
-/** Exact input tokens for a read, from Anthropic's free counting endpoint. */
-export type CountFn = (input: DeskInput) => Promise<number>;
+/** Both calls get the time left in the read's one overall deadline. */
+export type ReadFn = (input: DeskInput, timeoutMs: number) => Promise<{ items: AiItem[]; usage: ReadUsage }>;
+/** Input tokens for a read, from Anthropic's free counting endpoint. An estimate, so a margin is added. */
+export type CountFn = (input: DeskInput, timeoutMs: number) => Promise<number>;
+
+/**
+ * The whole read (count, then read) must finish inside this, leaving the
+ * route (maxDuration 120s) time to settle the cost and answer.
+ */
+export const DESK_READ_BUDGET_MS = 90_000;
+const COUNT_TIMEOUT_MS = 15_000;
+/** Below this, a read isn't started: it would likely be cut off after being billed. */
+const MIN_READ_MS = 20_000;
 
 function requestOf(input: DeskInput) {
   const content: Anthropic.Beta.BetaContentBlockParam[] = [];
@@ -212,17 +225,17 @@ function requestOf(input: DeskInput) {
   };
 }
 
-export const claudeCount: CountFn = async (input) => {
-  const client = new Anthropic({ maxRetries: 1, timeout: 30_000 });
+export const claudeCount: CountFn = async (input, timeoutMs) => {
+  const client = new Anthropic({ maxRetries: 0, timeout: timeoutMs });
   const { system, messages } = requestOf(input);
   const counted = await client.beta.messages.countTokens({ model: DESK_MODEL, system, messages, output_config: { format: betaZodOutputFormat(reading) } });
   return counted.input_tokens;
 };
 
 /** The real call to Claude. */
-export const claudeRead: ReadFn = async (input) => {
+export const claudeRead: ReadFn = async (input, timeoutMs) => {
   // No client retries: a retry after a timeout could be billed twice, outside the reservation.
-  const client = new Anthropic({ maxRetries: 0, timeout: 100_000 });
+  const client = new Anthropic({ maxRetries: 0, timeout: timeoutMs });
   const { system, messages } = requestOf(input);
   const response = await client.beta.messages.parse({
     model: DESK_MODEL,
@@ -242,34 +255,57 @@ export const claudeRead: ReadFn = async (input) => {
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
-const realDate = (d: string) => DATE.test(d) && new Date(`${d}T12:00:00Z`).toISOString().slice(0, 10) === d;
+/** A real calendar date, checked without throwing: "2026-13-01" is simply not one. */
+function realDate(d: string | null | undefined): d is string {
+  if (typeof d !== "string" || !DATE.test(d)) return false;
+  const t = Date.parse(`${d}T12:00:00Z`);
+  return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === d;
+}
 
 /** Keep only well-formed items: a model can be wrong about format, and nothing malformed reaches a command. */
-export function cleanItems(items: AiItem[]): AiItem[] {
-  return items
-    .filter((i) => i.title.trim() && realDate(i.startDate) && realDate(i.endDate) && i.endDate >= i.startDate)
-    .map((i) => {
-      const startTime = i.kind !== "holiday" && i.startTime && TIME.test(i.startTime) ? i.startTime : null;
-      const endTime = startTime && i.endTime && TIME.test(i.endTime) && (i.endDate > i.startDate || i.endTime > startTime) ? i.endTime : null;
-      const arriveBy = startTime && i.arriveBy && TIME.test(i.arriveBy) && i.arriveBy < startTime ? i.arriveBy : null;
-      const repeat = i.kind === "event" && i.role === "event" ? i.repeat : null;
-      const repeatUntil = repeat && i.repeatUntil && realDate(i.repeatUntil) && i.repeatUntil > i.startDate ? i.repeatUntil : null;
-      const text = (v: string | null, max: number) => (v?.trim() ? v.trim().slice(0, max) : null);
-      return {
-        ...i,
-        title: i.title.trim().slice(0, 80),
-        quote: i.quote.trim().slice(0, 400),
-        startTime,
-        endTime,
-        arriveBy,
-        repeat,
-        repeatUntil,
-        location: text(i.location, 200),
-        details: text(i.details, 300),
-        forWhom: text(i.forWhom, 80),
-        forItem: i.role === "deadline" ? text(i.forItem, 80) : null,
-      };
-    });
+function cleanItem(i: AiItem): AiItem | null {
+  if (!i.title?.trim() || !realDate(i.startDate) || !realDate(i.endDate) || i.endDate < i.startDate) return null;
+  const startTime = i.kind !== "holiday" && i.startTime && TIME.test(i.startTime) ? i.startTime : null;
+  const endTime = startTime && i.endTime && TIME.test(i.endTime) && (i.endDate > i.startDate || i.endTime > startTime) ? i.endTime : null;
+  const arriveBy = startTime && i.arriveBy && TIME.test(i.arriveBy) && i.arriveBy < startTime ? i.arriveBy : null;
+  const repeat = i.kind === "event" && i.role === "event" ? i.repeat : null;
+  const repeatUntil = repeat && realDate(i.repeatUntil) && i.repeatUntil > i.startDate ? i.repeatUntil : null;
+  const text = (v: string | null, max: number) => (v?.trim() ? v.trim().slice(0, max) : null);
+  return {
+    ...i,
+    title: i.title.trim().slice(0, 80),
+    quote: (i.quote ?? "").trim().slice(0, 400),
+    startTime,
+    endTime,
+    arriveBy,
+    repeat,
+    repeatUntil,
+    collectAt: i.pickupChange && i.collectAt && TIME.test(i.collectAt) ? i.collectAt : null,
+    location: text(i.location, 200),
+    details: text(i.details, 300),
+    forWhom: text(i.forWhom, 80),
+    forItem: i.role === "deadline" ? text(i.forItem, 80) : null,
+  };
+}
+
+/**
+ * Keep the items that make sense; one with an impossible date or no title is
+ * left out (and counted, so the person is told) without losing the rest.
+ */
+export function cleanItems(items: AiItem[]): { items: AiItem[]; unreadable: number } {
+  const out: AiItem[] = [];
+  let unreadable = 0;
+  for (const i of items) {
+    let c: AiItem | null = null;
+    try {
+      c = cleanItem(i);
+    } catch {
+      c = null;
+    }
+    if (c) out.push(c);
+    else unreadable++;
+  }
+  return { items: out, unreadable };
 }
 
 /** The ledger records what was really used; going past the reservation would mean the bound is wrong, so say so loudly. */
@@ -278,28 +314,47 @@ function recorded(actual: number, maxPence: number): number {
   return actual;
 }
 
-/** Read one letter for one household member, within the cap. */
-export async function readWithAi(db: Db, actor: Actor, input: DeskInput, read: ReadFn = claudeRead, now = new Date(), count: CountFn = claudeCount): Promise<AiItem[]> {
+/**
+ * Read one letter for one household member, within the cap and one overall
+ * deadline. The cost is settled as soon as the provider answers, before the
+ * answer is checked, so a malformed item can never change what was recorded.
+ */
+export async function readWithAi(
+  db: Db,
+  actor: Actor,
+  input: DeskInput,
+  read: ReadFn = claudeRead,
+  now = new Date(),
+  count: CountFn = claudeCount,
+  clock: () => number = Date.now,
+): Promise<{ items: AiItem[]; unreadable: number }> {
   if (!deskAiEnabled()) throw new DomainError("FEATURE_DISABLED", "The AI reader is switched off.");
   if (!input.text.trim() && !input.file) throw new DomainError("VALIDATION", "Paste a letter or add a photo or PDF first.");
+  const deadline = clock() + DESK_READ_BUDGET_MS;
   await assertMember(db, actor, input.householdId);
-  // Count the real input first (free), so the worst case is exact, not an estimate.
+  // Count the letter first. The count is free but is itself a request carrying the letter;
+  // it's an estimate, so worstCasePence adds a margin.
   let inputTokens: number;
   try {
-    inputTokens = await count(input);
+    inputTokens = await count(input, Math.min(COUNT_TIMEOUT_MS, deadline - clock()));
   } catch (err) {
     console.error("desk AI count failed", (err as Error)?.message);
     throw new DomainError("FEATURE_DISABLED", "The AI reader couldn't be reached, so this letter was read the simpler way.");
   }
+  const left = deadline - clock();
+  if (left < MIN_READ_MS) throw new DomainError("FEATURE_DISABLED", "The AI reader was too slow just now, so this letter was read the simpler way.");
   const maxPence = worstCasePence(inputTokens);
   const requestId = await reserve(db, input.householdId, maxPence, now);
+  let answer: AiItem[];
   try {
-    const { items, usage } = await read(input);
+    const { items, usage } = await read(input, left);
     await settle(db, requestId, recorded(costPence(usage), maxPence));
-    return cleanItems(items);
+    answer = items;
   } catch (err) {
-    // A refusal says what it used; a failed call may still have been billed,
-    // so keep the reservation (never more) unless it surely wasn't.
+    // A refusal says what it used; a failed or timed-out call may still have been billed,
+    // so keep the reservation (never more) unless it surely wasn't. If the server itself
+    // is stopped before this runs, the reservation stays counted at its maximum: never
+    // released for being old, since the provider may have billed it.
     const used = (err as { usage?: ReadUsage })?.usage;
     const surelyNotBilled = err instanceof Anthropic.APIError && err.status !== undefined && err.status < 500 && err.status !== 408;
     await settle(db, requestId, used ? recorded(costPence(used), maxPence) : surelyNotBilled ? null : maxPence);
@@ -307,4 +362,5 @@ export async function readWithAi(db: Db, actor: Actor, input: DeskInput, read: R
     console.error("desk AI read failed", (err as Error)?.message);
     throw new DomainError("FEATURE_DISABLED", "The AI reader couldn't be reached, so this letter was read the simpler way.");
   }
+  return cleanItems(answer);
 }

@@ -1,10 +1,11 @@
-import { and, eq, gte, inArray, isNull } from "drizzle-orm";
+import { and, eq, gte, isNull } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { events, jobDone, jobs, trips } from "@/db/schema";
+import { jobDone, jobs } from "@/db/schema";
 import { jobCadenceLabel, jobStatus, monthlyMinutes, type JobCadence, type JobStatus } from "@/domain/jobs";
 import { addDays, instantToLocal, instantToLocalDate } from "@/domain/time";
 import type { Actor } from "../auth";
 import { currentAdults } from "../commands/helpers";
+import { linkedTitles } from "../linked";
 import { householdFor } from "./week";
 
 export interface JobView {
@@ -60,17 +61,12 @@ export async function jobsFor(db: Db, actor: Actor, now = new Date()): Promise<J
   const doneBy = new Map(done.map((d) => [`${d.jobId}:${d.dueOn}`, d.doneBy]));
 
   // What each job is for, shown only where the viewer can see that item.
-  const eventIds = rows.filter((j) => j.forType === "event" && j.forId).map((j) => j.forId!);
-  const tripIds = rows.filter((j) => j.forType === "trip" && j.forId).map((j) => j.forId!);
-  const forTitles = new Map<string, string>();
-  if (eventIds.length) {
-    for (const e of await db.select({ id: events.id, title: events.title, visibility: events.visibility, ownerId: events.ownerId, cancelledAt: events.cancelledAt }).from(events).where(inArray(events.id, eventIds))) {
-      if (!e.cancelledAt && (e.visibility === "shared" || e.ownerId === actor.accountId)) forTitles.set(e.id, e.title);
-    }
-  }
-  if (tripIds.length) {
-    for (const t of await db.select({ id: trips.id, title: trips.title, cancelledAt: trips.cancelledAt }).from(trips).where(inArray(trips.id, tripIds))) if (!t.cancelledAt) forTitles.set(t.id, t.title);
-  }
+  const forTitles = await linkedTitles(
+    db,
+    household.id,
+    actor.accountId,
+    rows.flatMap((j) => (j.forType && j.forId ? [{ type: j.forType, id: j.forId }] : [])),
+  );
   const nowClock = instantToLocal(now.getTime(), household.timeZone).toPlainTime().toString().slice(0, 5);
 
   const order: Record<JobStatus, number> = { overdue: 0, today: 1, upcoming: 2, done: 3 };

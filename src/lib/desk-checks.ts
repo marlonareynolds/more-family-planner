@@ -36,14 +36,15 @@ export function plusMinutes(time: string, minutes: number): string {
 }
 
 export function checksFor(
-  p: Pick<Proposal, "kind" | "role" | "startTime" | "endTime" | "endStated" | "dateCertain" | "pickupChange" | "forWhom" | "childIds" | "source" | "title" | "details">,
+  p: Pick<Proposal, "kind" | "role" | "startTime" | "endTime" | "endStated" | "dateCertain" | "pickupChange" | "forWhom" | "childIds" | "source" | "title" | "details"> & { collectAt?: string | null },
   ctx: { children: { id: string }[]; letter: string | null },
 ): DeskCheck[] {
   const out: DeskCheck[] = [];
   if (!p.dateCertain) out.push({ code: "date_unclear", text: "The date was worked out from the letter. Check it before adding.", decide: true });
-  if (p.pickupChange) out.push({ code: "pickup", text: "This changes a pickup. Choose who collects, or leave it out.", decide: true });
+  if (p.pickupChange) out.push({ code: "pickup", text: `This changes a pickup${p.collectAt ? `: collection at ${p.collectAt}` : ""}. Choose who collects, or leave it out.`, decide: true });
   if (p.role === "deadline" && PAYMENT.test(`${p.title} ${p.details} ${p.source}`)) out.push({ code: "payment", text: "A payment. Choose who will pay it.", decide: true });
-  if (p.kind !== "holiday" && ctx.children.length > 1 && p.childIds.length === 0 && (p.forWhom || FOR_A_CHILD.test(p.source))) {
+  // A school break naming no child may be one school's: with more than one child, ask rather than cover them all.
+  if (ctx.children.length > 1 && p.childIds.length === 0 && (p.kind === "holiday" || p.forWhom || FOR_A_CHILD.test(p.source))) {
     out.push({ code: "which_child", text: p.forWhom ? `For ${p.forWhom}. Check which child.` : "Check which child this is for.", decide: true });
   }
   if (ctx.letter !== null && p.source && !words(ctx.letter).includes(words(p.source))) {

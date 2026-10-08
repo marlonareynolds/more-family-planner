@@ -4,9 +4,9 @@ import { AlertTriangle, Check, FileText, Inbox, Info, Lock, Sparkles } from "luc
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { checksFor, noteLines, plusMinutes, type CheckCode, type DeskCheck } from "@/lib/desk-checks";
-import { dayTitleKey, deskKeys, normTitle, type KeyFields } from "@/lib/desk-keys";
+import { dayTitleKey, deskKeys, diaryTimes, normTitle, type KeyFields } from "@/lib/desk-keys";
 import { childrenIn, readLetter, type Proposal, type ProposalKind, type ProposalRole } from "@/lib/desk-read";
-import type { DeskStatus } from "@/server/desk";
+import type { DeskStatus, DeskTarget } from "@/server/desk";
 import { useApp } from "./app-context";
 import { fmtDate, todayIn } from "./format";
 import { PeoplePicker } from "./people-picker";
@@ -31,8 +31,10 @@ interface Draft extends Omit<Proposal, "key" | "startTime" | "endTime" | "arrive
   choice: Choice;
   /** For a deadline, which becomes a job: who takes it on. */
   owner: "me" | "partner" | "none" | null;
-  /** "I've checked it" answers, and "who collects" chosen. */
+  /** "I've checked it" answers. */
   confirmed: Partial<Record<CheckCode, boolean>>;
+  /** For a changed pickup: who collects. Choosing the other adult asks them. */
+  collect: "me" | "partner" | "none" | null;
   dup: DeskStatus | null;
   /** Shown under "needs your decision" from the start, so a card doesn't jump once answered. */
   flagged: boolean;
@@ -56,6 +58,7 @@ function draftOf(p: Proposal, meId: string, hasChildren: boolean): Draft {
     choice: "add",
     owner: null,
     confirmed: {},
+    collect: null,
     dup: null,
     flagged: false,
     state: "ready",
@@ -72,7 +75,7 @@ function answered(d: Draft, c: DeskCheck): boolean {
   if (!c.decide) return true;
   if (c.code === "payment") return d.owner !== null;
   if (c.code === "which_child") return d.childIds.length > 0;
-  if (c.code === "pickup") return !!d.confirmed.pickup && d.adultIds.length > 0;
+  if (c.code === "pickup") return d.collect !== null;
   return !!d.confirmed[c.code];
 }
 
@@ -98,7 +101,16 @@ function keyFields(d: Draft): KeyFields {
     location: d.location,
     details: d.details,
     childIds: d.childIds,
+    arriveBy: d.kind === "event" && !d.allDay && d.arriveBy ? d.arriveBy : null,
+    repeat: d.kind === "event" ? d.repeat : null,
+    repeatUntil: d.kind === "event" && d.repeat ? d.repeatUntil : null,
   };
+}
+
+/** The entry the card would change, if there is exactly one it can. */
+function updatable(d: Draft): DeskTarget | null {
+  const t = d.dup?.status === "changed" ? d.dup.current : d.dup?.status === "possible" && d.dup.candidates.length === 1 ? d.dup.candidates[0] : null;
+  return t && !t.recurring && (t.targetType === "event" || t.targetType === "trip") ? t : null;
 }
 
 /**
@@ -133,7 +145,8 @@ export function DeskBoard({ ai = false }: { ai?: boolean }) {
       const items = await Promise.all(
         ds.map(async (d) => {
           const f = keyFields(d);
-          return { ref: d.key, kind: f.kind, startDate: d.startDate, ...(await deskKeys(app.householdId, f, null)), dayTitleKey: await dayTitleKey(app.householdId, d.startDate, d.title) };
+          const t = diaryTimes(f);
+          return { ref: d.key, kind: f.kind, startDate: d.startDate, startTime: t.startTime, endDate: t.endDate, endTime: t.endTime, ...(await deskKeys(app.householdId, f, null)), dayTitleKey: await dayTitleKey(app.householdId, d.startDate, d.title) };
         }),
       );
       if (items.length) {
@@ -171,6 +184,7 @@ export function DeskBoard({ ai = false }: { ai?: boolean }) {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error?.message ?? "The AI reader couldn't be reached, so this letter was read the simpler way.");
       await settle((body.items as AiItem[]).map((i, n) => fromAi(i, n, ctx)), text.trim() ? text : null);
+      if (body.unreadable) setReadNote(body.unreadable === 1 ? "One thing in the letter couldn't be read properly (an impossible date), so it isn't shown. Check the letter for it." : `${body.unreadable} things in the letter couldn't be read properly, so they aren't shown. Check the letter for them.`);
     } catch (err) {
       setReadNote(file && !text.trim() ? `${(err as Error).message.replace(/, so this letter was read the simpler way\.$/, ".")} Try again, or paste the letter's text instead.` : (err as Error).message);
       if (text.trim()) await settle(readLetter(text, ctx), text);
@@ -192,6 +206,7 @@ export function DeskBoard({ ai = false }: { ai?: boolean }) {
   }
   const patch = (key: string, change: Partial<Draft>) => setDrafts((ds) => ds?.map((d) => (d.key === key ? { ...d, ...change } : d)) ?? null);
   const live = drafts?.filter((d) => d.state === "ready" || d.state === "failed") ?? [];
+  const failedRef = typeof error?.details?.ref === "string" ? error.details.ref : null;
   const chosen = live.filter((d) => d.choice === "add" || d.choice === "update");
   const undecided = live.filter((d) => d.choice === "undecided");
   const blocked = chosen.filter((d) => !valid(d) || checksFor(asProposal(d), checkCtx).some((c) => !answered(d, c)));
@@ -219,21 +234,19 @@ export function DeskBoard({ ai = false }: { ai?: boolean }) {
           ...f,
           justMe: d.justMe,
           action,
-          targetId: action === "update" && d.dup && "targetId" in d.dup ? d.dup.targetId : null,
+          targetId: action === "update" ? (updatable(d)?.targetId ?? null) : null,
+          targetVersion: action === "update" ? (updatable(d)?.version ?? null) : null,
           adultIds: d.adultIds,
-          arriveBy: !f.allDay && d.arriveBy ? d.arriveBy : null,
-          repeat: d.repeat,
-          repeatUntil: d.repeatUntil,
           notes: noteLines(checks),
           owner: d.owner ?? "none",
           forRef: forRef(d),
+          collect: checks.some((c) => c.code === "pickup") ? d.collect : null,
+          collectAt: checks.some((c) => c.code === "pickup") ? d.collectAt : null,
         };
       });
     const result = await run<{ results: { ref: string; outcome: "added" | "updated" | "already"; by?: string }[] }>("ImportDeskItems", { items }, { expected: { membershipRevision: app.membershipRevision }, refresh: false });
-    if (!result) {
-      setDrafts((ds) => ds?.map((d) => (chosen.includes(d) ? { ...d, state: "failed" } : d)) ?? null);
-      return;
-    }
+    // Nothing was added; the cards stay as the person left them, and the one that stopped it says so.
+    if (!result) return;
     setDrafts((ds) => ds?.map((d) => {
       const r = result.results.find((x) => x.ref === d.key);
       return r ? { ...d, state: r.outcome } : d;
@@ -265,7 +278,7 @@ export function DeskBoard({ ai = false }: { ai?: boolean }) {
         <Lock aria-hidden size={16} className="mt-0.5 shrink-0" />
         {ai ? (
           <span>
-            The letter is sent to Anthropic for Claude, its AI, to read. Anthropic doesn&apos;t use it for training, but may keep a copy for up to 30 days for safety checks, as its terms allow. More itself doesn&apos;t save the letter: only what you add is kept, and {app.partner ? `${app.partner.displayName} only sees` : "anyone you share with only sees"} that.
+            The letter is sent to Anthropic for Claude, its AI, to read. Anthropic doesn&apos;t use it for training. Under its standard terms it normally deletes it within 30 days, but may keep it longer where the law requires or a safety review needs it. More itself doesn&apos;t save the letter: only the items you add are kept, for as long as they&apos;re in your diary, and {app.partner ? `${app.partner.displayName} only sees` : "anyone you share with only sees"} those.
           </span>
         ) : (
           <span>
@@ -324,7 +337,7 @@ export function DeskBoard({ ai = false }: { ai?: boolean }) {
               <ul className="flex flex-col gap-3">
                 {needs.map((d) => (
                   <li key={d.key}>
-                    <DraftCard d={d} ctx={checkCtx} onChange={(change) => patch(d.key, change)} />
+                    <DraftCard d={d} ctx={checkCtx} failed={failedRef === d.key ? error?.message : undefined} onChange={(change) => patch(d.key, change)} />
                   </li>
                 ))}
               </ul>
@@ -343,7 +356,7 @@ export function DeskBoard({ ai = false }: { ai?: boolean }) {
               <ul className="flex flex-col gap-3">
                 {main.map((d) => (
                   <li key={d.key}>
-                    <DraftCard d={d} ctx={checkCtx} onChange={(change) => patch(d.key, change)} />
+                    <DraftCard d={d} ctx={checkCtx} failed={failedRef === d.key ? error?.message : undefined} onChange={(change) => patch(d.key, change)} />
                   </li>
                 ))}
               </ul>
@@ -354,7 +367,7 @@ export function DeskBoard({ ai = false }: { ai?: boolean }) {
                   <ul className="flex flex-col gap-2">
                     {extras.map((d) => (
                       <li key={d.key}>
-                        <DraftCard d={d} ctx={checkCtx} onChange={(change) => patch(d.key, change)} />
+                        <DraftCard d={d} ctx={checkCtx} failed={failedRef === d.key ? error?.message : undefined} onChange={(change) => patch(d.key, change)} />
                       </li>
                     ))}
                   </ul>
@@ -394,6 +407,7 @@ interface AiItem {
   forWhom: string | null;
   dateCertain: boolean;
   pickupChange: boolean;
+  collectAt: string | null;
   forItem: string | null;
   quote: string;
 }
@@ -420,8 +434,10 @@ function fromAi(i: AiItem, n: number, ctx: { today: string; children: { id: stri
     forWhom: i.forWhom,
     dateCertain: i.dateCertain,
     pickupChange: i.pickupChange,
+    collectAt: i.collectAt ?? null,
     forItem: i.forItem,
-    childIds: named.length || i.kind !== "holiday" ? named : ctx.children.map((c) => c.id),
+    // A break that names no child covers an only child; with more than one, the card asks which.
+    childIds: named.length || i.kind !== "holiday" ? named : ctx.children.length === 1 ? [ctx.children[0].id] : [],
     source: i.quote,
     past: i.endDate < ctx.today,
   };
@@ -436,23 +452,44 @@ function valid(d: Draft): boolean {
   return true;
 }
 
-/** What the server found already in the diary, in words. */
-function dupLine(dup: DeskStatus): string {
+/** "Tue 12 Nov at 09:00 to 15:00", as the diary has it now. */
+function targetWhen(t: DeskTarget): string {
+  const day = t.endDate > t.startDate ? `${fmtDate(t.startDate)} to ${fmtDate(t.endDate)}` : fmtDate(t.startDate);
+  return t.startTime ? `${day} at ${t.startTime}${t.endTime && t.targetType !== "job" ? ` to ${t.endTime}` : ""}` : day;
+}
+
+/** What the server found already in the diary, in words. Nothing here claims more than it knows. */
+function dupLine(d: Draft): string {
+  const dup = d.dup;
+  if (!dup) return "";
   if (dup.status === "added") return `Already in the diary: added by ${dup.by} on ${fmtDate(dup.on)}. It won't be added twice.`;
-  if (dup.status === "changed") return `Already in the diary (added by ${dup.by} on ${fmtDate(dup.on)}), but the time, place or details have changed.`;
-  if (dup.status === "moved") return `Already in the diary on ${fmtDate(dup.was)}. Has it moved?`;
+  if (dup.status === "changed") {
+    const tail = dup.current.recurring ? " It repeats, so change it in the diary if you need to." : "";
+    return `Added by ${dup.by} on ${fmtDate(dup.on)}, but the letter and the diary differ now. The diary has ${targetWhen(dup.current)}.${tail}`;
+  }
+  if (dup.status === "possible") {
+    const list = dup.candidates.map(targetWhen).join("; ");
+    const many = dup.candidates.length > 1 ? " To change one of those, do it in the diary." : dup.candidates[0].recurring ? " It repeats, so change it in the diary if it has moved." : "";
+    return dup.sameDay
+      ? `“${d.title}” is already in the diary that day (${list}). Is this another session, or has the time changed?${many}`
+      : `“${d.title}” is already in the diary on ${list}. Is this a new date for it, or another one?${many}`;
+  }
   if (dup.status === "similar") return `Something called “${dup.title}” is already in the diary that day.`;
   return "";
 }
 
 function choicesFor(d: Draft): { value: Choice; label: string }[] {
-  const canUpdate = !!d.dup && (d.dup.status === "changed" || d.dup.status === "moved") && (d.dup.targetType === "event" || d.dup.targetType === "trip");
-  if (canUpdate) return [{ value: "update", label: d.dup!.status === "moved" ? "Move it" : "Update the entry" }, { value: "add", label: "Add as new" }, { value: "skip", label: "Leave out" }];
+  const t = updatable(d);
+  if (d.dup?.status === "changed") return [...(t ? [{ value: "update" as const, label: "Update the entry" }] : []), { value: "add", label: "Add as new" }, { value: "skip", label: "Leave out" }];
+  if (d.dup?.status === "possible") {
+    const other = d.dup.sameDay ? "Another session" : "Another one";
+    return [...(t ? [{ value: "update" as const, label: d.dup.sameDay ? "Change that one" : "Move that one" }] : []), { value: "add", label: other }, { value: "skip", label: "Leave out" }];
+  }
   if (d.dup?.status === "similar") return [{ value: "add", label: "Add anyway" }, { value: "skip", label: "Leave out" }];
   return [{ value: "add", label: "Add this" }, { value: "skip", label: "Leave out" }];
 }
 
-function DraftCard({ d, ctx, onChange }: { d: Draft; ctx: { children: { id: string }[]; letter: string | null }; onChange: (change: Partial<Draft>) => void }) {
+function DraftCard({ d, ctx, failed, onChange }: { d: Draft; ctx: { children: { id: string }[]; letter: string | null }; failed?: string; onChange: (change: Partial<Draft>) => void }) {
   const app = useApp();
   if (d.state === "added" || d.state === "updated" || d.state === "already") {
     const word = d.state === "added" ? "Added" : d.state === "updated" ? "Updated" : "Already in the diary";
@@ -487,7 +524,7 @@ function DraftCard({ d, ctx, onChange }: { d: Draft; ctx: { children: { id: stri
 
       {d.dup && d.dup.status !== "new" && (
         <p className="flex items-start gap-2 text-sm text-ink-2">
-          <Info aria-hidden size={16} className="mt-0.5 shrink-0" /> {dupLine(d.dup)}
+          <Info aria-hidden size={16} className="mt-0.5 shrink-0" /> {dupLine(d)}
         </p>
       )}
       {notes.length > 0 && (
@@ -528,12 +565,18 @@ function DraftCard({ d, ctx, onChange }: { d: Draft; ctx: { children: { id: stri
               {c.text}
             </p>
             {c.code === "pickup" && (
-              <Segmented
-                label="Who collects"
-                value={d.confirmed.pickup ? (d.adultIds[0] ?? "") : ""}
-                onChange={(id) => onChange({ adultIds: [id], confirmed: { ...d.confirmed, pickup: true } })}
-                options={app.adults.map((a) => ({ value: a.id, label: a.id === app.me.id ? "I'll collect" : `${a.displayName} collects` }))}
-              />
+              <>
+                <Segmented
+                  label="Who collects"
+                  value={d.collect ?? ("" as "me")}
+                  onChange={(collect) => onChange({ collect })}
+                  options={[{ value: "me" as const, label: "I'll collect" }, ...(app.partner ? [{ value: "partner" as const, label: `Ask ${app.partner.displayName} to collect` }] : []), { value: "none" as const, label: "Not decided yet" }]}
+                />
+                {d.collect === "partner" && app.partner && (
+                  <p className="text-sm text-ink-3">{app.partner.displayName} gets a request in Jobs. Until they agree, the collection shows as asked, not arranged.</p>
+                )}
+                {d.collect === "none" && <p className="text-sm text-ink-3">The collection goes in Jobs with nobody on it yet, so it stays in sight.</p>}
+              </>
             )}
             {c.code === "payment" && (
               <Segmented
@@ -554,8 +597,8 @@ function DraftCard({ d, ctx, onChange }: { d: Draft; ctx: { children: { id: stri
           </div>
         ))}
 
-      {d.state === "failed" && <p className="text-sm text-bad">This one wasn&apos;t added. Check the details and try again.</p>}
-      {on && (d.open || d.state === "failed" || !valid(d)) && (
+      {failed && <p className="text-sm text-bad">{failed} Nothing was added yet; change this card or leave it out, then add again.</p>}
+      {on && (d.open || !!failed || !valid(d)) && (
         <>
           <blockquote className="border-l-2 border-line pl-3 text-sm italic text-ink-3">&ldquo;{d.source}&rdquo;</blockquote>
           {d.role !== "deadline" && (

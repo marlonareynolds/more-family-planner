@@ -20,6 +20,7 @@ const fair: AiItem = {
   forWhom: null,
   dateCertain: true,
   pickupChange: false,
+  collectAt: null,
   forItem: null,
   quote: "Our Christmas Fair will take place on Saturday 5 December from 11:00am to 2:00pm.",
 };
@@ -48,7 +49,7 @@ describe("Household desk AI reader", () => {
 
   it("reads for a household member and records what the read cost", async () => {
     const w = await newWorld();
-    expect(await readWithAi(w.db, w.alex, input(w.householdId), answer([fair]), undefined, counted())).toEqual([fair]);
+    expect(await readWithAi(w.db, w.alex, input(w.householdId), answer([fair]), undefined, counted())).toEqual({ items: [fair], unreadable: 0 });
     const [row] = await w.db.select().from(usageReservations);
     expect(row).toMatchObject({ state: "settled", actualCostMinor: 4 }); // (3,000 × $4 + 1,500 × $20) / 1M = $0.042, about 3.4p, rounded up
   });
@@ -122,7 +123,7 @@ describe("Household desk AI reader", () => {
     }
   });
 
-  it("can't reach the counting service: nothing is reserved or sent", async () => {
+  it("can't reach the counting service: no read is sent and nothing is reserved", async () => {
     const w = await newWorld();
     let called = false;
     const noCount: CountFn = async () => {
@@ -143,12 +144,63 @@ describe("Household desk AI reader", () => {
         { ...fair, kind: "holiday", startTime: "09:00", endTime: "17:00" },
         { ...fair, startTime: "25:00" },
         { ...fair, endTime: "10:00" },
-      ]).map((i) => [i.kind, i.startTime, i.endTime]),
+      ]).items.map((i) => [i.kind, i.startTime, i.endTime]),
     ).toEqual([
       ["event", "11:00", "14:00"],
       ["holiday", null, null],
       ["event", null, null],
       ["event", "11:00", null],
     ]);
+  });
+
+  it("Q07: a malformed date drops that item only, and the recorded cost stands", async () => {
+    process.env.DESK_AI_MONTHLY_CAP_PENCE = "100000";
+    const w = await newWorld();
+    const odd = [fair, { ...fair, title: "Bad month", startDate: "2026-13-01", endDate: "2026-13-01" }, { ...fair, title: "Bad repeat", repeat: "weekly" as const, repeatUntil: "2026-02-30" }];
+    const result = await readWithAi(w.db, w.alex, input(w.householdId), answer(odd), undefined, counted());
+    expect(result.unreadable).toBe(1);
+    expect(result.items.map((i) => [i.title, i.repeatUntil])).toEqual([
+      ["Christmas Fair", null],
+      ["Bad repeat", null],
+    ]);
+    const [row] = await w.db.select().from(usageReservations);
+    // The provider's reported usage, not the worst case.
+    expect(row).toMatchObject({ state: "settled", actualCostMinor: costPence(usage) });
+    expect(row.actualCostMinor).toBeLessThan(row.maxCostMinor);
+  });
+
+  it("one deadline covers counting and reading, with time left to settle", async () => {
+    process.env.DESK_AI_MONTHLY_CAP_PENCE = "100000";
+    const w = await newWorld();
+    let t = 0;
+    const clock = () => t;
+    const timeouts: number[] = [];
+    const slowCount: CountFn = async (_, ms) => ((timeouts.push(ms), (t += 30_000)), 3_000);
+    const read: ReadFn = async (_, ms) => (timeouts.push(ms), { items: [fair], usage });
+    await readWithAi(w.db, w.alex, input(w.householdId), read, undefined, slowCount, clock);
+    // Count gets at most 15s; the read gets what's left of 90s, so the route's 120s has 30s to spare.
+    expect(timeouts).toEqual([15_000, 60_000]);
+  });
+
+  it("too little time left: the read isn't started and nothing is reserved", async () => {
+    const w = await newWorld();
+    let t = 0;
+    let called = false;
+    const stuckCount: CountFn = async () => ((t += 75_000), 3_000);
+    await expectCode(readWithAi(w.db, w.alex, input(w.householdId), async () => ((called = true), { items: [], usage }), undefined, stuckCount, () => t), "FEATURE_DISABLED");
+    expect(called).toBe(false);
+    expect(await w.db.select().from(usageReservations)).toEqual([]);
+  });
+
+  it("a read cut off by its deadline keeps the reservation, never more", async () => {
+    process.env.DESK_AI_MONTHLY_CAP_PENCE = "100000";
+    const w = await newWorld();
+    const timedOut: ReadFn = async () => {
+      throw Object.assign(new Error("Request timed out."), { name: "APIConnectionTimeoutError" });
+    };
+    await expectCode(readWithAi(w.db, w.alex, input(w.householdId), timedOut, undefined, counted()), "FEATURE_DISABLED");
+    const [row] = await w.db.select().from(usageReservations);
+    expect(row).toMatchObject({ state: "settled" });
+    expect(row.actualCostMinor).toBe(row.maxCostMinor);
   });
 });

@@ -7,8 +7,9 @@
  * `seriesKey`: kind, title and children (two siblings stay distinct).
  * `identityKey`: that plus the first date and start time (two sessions, on two
  * days or one after the other, stay distinct).
- * `detailKey`: that plus times, end date, place and details, so a changed
- * notice is told apart from a repeat of the same one.
+ * `detailKey`: that plus times, end date, place, details, arrival time and
+ * repeats: everything the letter decides, so a changed notice is told apart
+ * from a repeat of the same one.
  * `scope` is the adder's id for a "just for me" item, so it never matches,
  * or collides with, anyone else's.
  */
@@ -24,6 +25,22 @@ export interface KeyFields {
   location: string;
   details: string;
   childIds: string[];
+  arriveBy?: string | null;
+  repeat?: string | null;
+  repeatUntil?: string | null;
+}
+
+/**
+ * The times an item will hold in the diary: an event that says "arrive by
+ * 08:30" starts then. Shared by the import and the phone's duplicate check,
+ * so both compare the same thing.
+ */
+export function diaryTimes(i: Pick<KeyFields, "kind" | "allDay" | "startTime" | "endTime" | "endDate"> & { arriveBy?: string | null }) {
+  if (i.kind === "holiday" || (i.kind === "event" && i.allDay) || (i.kind !== "trip" && !i.startTime)) return { startTime: null, endTime: null, endDate: i.endDate };
+  if (i.kind === "trip") return { startTime: i.startTime ?? "09:00", endTime: i.endTime ?? "17:00", endDate: i.endDate };
+  if (i.kind === "job") return { startTime: i.startTime, endTime: null, endDate: i.endDate };
+  const start = i.kind === "event" && i.arriveBy && i.startTime && i.arriveBy < i.startTime ? i.arriveBy : i.startTime;
+  return { startTime: start, endTime: i.endTime ?? start, endDate: i.endDate };
 }
 
 export function normTitle(title: string): string {
@@ -50,7 +67,7 @@ export async function deskKeys(householdId: string, i: KeyFields, scope: string 
   const children = [...new Set(i.childIds)].sort().join(",");
   const seriesKey = await sha(householdId, scope ?? "shared", i.kind, normTitle(i.title), children);
   const identityKey = await sha(seriesKey, i.startDate, i.allDay ? "all-day" : (i.startTime ?? ""));
-  const detailKey = await sha(identityKey, i.endDate, i.allDay ? "all-day" : `${i.startTime ?? ""}-${i.endTime ?? ""}`, normTitle(i.location), normTitle(i.details));
+  const detailKey = await sha(identityKey, i.endDate, i.allDay ? "all-day" : `${i.startTime ?? ""}-${i.endTime ?? ""}`, normTitle(i.location), normTitle(i.details), i.arriveBy ?? "", i.repeat ?? "", i.repeatUntil ?? "");
   return { seriesKey, identityKey, detailKey };
 }
 

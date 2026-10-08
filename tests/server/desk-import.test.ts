@@ -3,7 +3,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { events, jobs, trips } from "@/db/schema";
 import { checkDesk, deskKeys, type DeskCheckInput } from "@/server/desk";
-import { dayTitleKey, normTitle } from "@/lib/desk-keys";
+import { dayTitleKey, diaryTimes, normTitle } from "@/lib/desk-keys";
 import { jobsFor } from "@/server/queries/jobs";
 import { newWorld, type World } from "./harness";
 
@@ -37,7 +37,8 @@ const card = (over: Record<string, unknown> = {}) => ({
 
 async function statusOf(w: World, viewer: World["alex"], c: ReturnType<typeof card>) {
   const keys = await deskKeys(w.householdId, c as never, c.justMe ? viewer.accountId : null);
-  const item: DeskCheckInput = { ref: c.ref, kind: c.kind as never, startDate: c.startDate, ...keys, dayTitleKey: await dayTitleKey(w.householdId, c.startDate, c.title) };
+  const t = diaryTimes(c as never);
+  const item: DeskCheckInput = { ref: c.ref, kind: c.kind as never, startDate: c.startDate, startTime: t.startTime, endDate: t.endDate, endTime: t.endTime, ...keys, dayTitleKey: await dayTitleKey(w.householdId, c.startDate, c.title) };
   return (await checkDesk(w.db, viewer, w.householdId, [item]))[0];
 }
 
@@ -76,8 +77,8 @@ describe("Household Desk duplicates and follow-through", () => {
     const { results } = await imp(w, w.alex, [card()]);
     const changed = card({ endTime: "16:00", details: "Packed lunch, waterproof coat, £5 for the shop" });
     const s = await statusOf(w, w.sam, changed);
-    expect(s).toMatchObject({ status: "changed", targetId: results[0].targetId });
-    const up = await imp(w, w.sam, [{ ...changed, action: "update", targetId: results[0].targetId }]);
+    expect(s).toMatchObject({ status: "changed", current: { targetId: results[0].targetId, startTime: "09:00", endTime: "15:15" } });
+    const up = await imp(w, w.sam, [{ ...changed, action: "update", targetId: results[0].targetId, targetVersion: (s as { current: { version: number } }).current.version }]);
     expect(up.results[0].outcome).toBe("updated");
     const rows = await liveEvents(w);
     expect(rows).toHaveLength(1);
@@ -86,12 +87,13 @@ describe("Household Desk duplicates and follow-through", () => {
     expect(await statusOf(w, w.alex, changed)).toMatchObject({ status: "added" });
   });
 
-  it("a new start time on the same day is a change, not a second entry", async () => {
+  it("a new start time on the same day is offered as a possible change, and can update the one entry", async () => {
     const w = await newWorld();
     const { results } = await imp(w, w.alex, [card()]);
     const later = card({ startTime: "10:00" });
-    expect(await statusOf(w, w.sam, later)).toMatchObject({ status: "changed", targetId: results[0].targetId });
-    await imp(w, w.sam, [{ ...later, action: "update", targetId: results[0].targetId }]);
+    const s = await statusOf(w, w.sam, later);
+    expect(s).toMatchObject({ status: "possible", sameDay: true, candidates: [{ targetId: results[0].targetId, startTime: "09:00" }] });
+    await imp(w, w.sam, [{ ...later, action: "update", targetId: results[0].targetId, targetVersion: (s as { candidates: { version: number }[] }).candidates[0].version }]);
     const rows = await liveEvents(w);
     expect(rows).toHaveLength(1);
     expect(rows[0].localStart).toBe("2026-11-12T10:00");
@@ -102,8 +104,9 @@ describe("Household Desk duplicates and follow-through", () => {
     const w = await newWorld();
     const { results } = await imp(w, w.alex, [card()]);
     const moved = card({ startDate: "2026-11-19", endDate: "2026-11-19" });
-    expect(await statusOf(w, w.alex, moved)).toMatchObject({ status: "moved", was: "2026-11-12", targetId: results[0].targetId });
-    await imp(w, w.alex, [{ ...moved, action: "update", targetId: results[0].targetId }]);
+    const s = await statusOf(w, w.alex, moved);
+    expect(s).toMatchObject({ status: "possible", sameDay: false, candidates: [{ startDate: "2026-11-12", targetId: results[0].targetId }] });
+    await imp(w, w.alex, [{ ...moved, action: "update", targetId: results[0].targetId, targetVersion: (s as { candidates: { version: number }[] }).candidates[0].version }]);
     const rows = await liveEvents(w);
     expect(rows).toHaveLength(1);
     expect(rows[0].localStart.slice(0, 10)).toBe("2026-11-19");

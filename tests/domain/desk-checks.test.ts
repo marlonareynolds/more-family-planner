@@ -68,4 +68,20 @@ describe("Desk card checks", () => {
     expect(codes(p, "Harvest   festival on **Friday** 17 October.")).not.toContain("not_in_letter!");
     expect(codes(p, "Sports day on Friday 17 October.")).toContain("not_in_letter!");
   });
+
+  it("keeps the collection time of an early finish", () => {
+    const p = one("School closes at 1.30pm on Friday 19 December.");
+    expect(p.collectAt).toBe("13:30");
+    expect(checksFor(p, { children: kids, letter: null }).find((c) => c.code === "pickup")?.text).toBe("This changes a pickup: collection at 13:30. Choose who collects, or leave it out.");
+  });
+
+  it("a break naming no child asks which, when there's more than one", () => {
+    const p = one("INSET day on Monday 3 November, school closed.");
+    expect(p.kind).toBe("holiday");
+    expect(p.childIds).toEqual([]);
+    expect(codes(p)).toContain("which_child!");
+    // An only child is covered without asking.
+    const only = readLetter("INSET day on Monday 3 November, school closed.", { today: "2026-10-07", children: [kids[0]] })[0];
+    expect(only.childIds).toEqual([kids[0].id]);
+  });
 });
