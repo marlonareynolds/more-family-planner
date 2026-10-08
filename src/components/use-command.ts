@@ -17,7 +17,8 @@ function confirmation(command: string, p: Payload): { text: string; celebrate?: 
     case "RespondToMoment":
       return p?.decision === "accepted" ? { text: "You're in. It's in the diary.", celebrate: true } : { text: "Answer sent." };
     case "CompleteMoment": return { text: "Lovely. Add a memory while it's fresh.", celebrate: true };
-    case "PlanWeek": return { text: "Your week is planned.", celebrate: true };
+    case "PlanWeek":
+      return Array.isArray(p?.items) && p.items.length === 0 ? { text: "Done. The rest of the week stays as it is." } : { text: "Your week is planned.", celebrate: true };
     case "MarkJobDone": return { text: "Done. One less thing.", celebrate: true };
     case "AnswerJobOwner": return p?.accept ? { text: "It's yours now. Thank you." } : { text: "Answer sent." };
     case "ProposeJobOwner": return p?.to === "partner" ? { text: "Asked. They'll see it on Today." } : null;

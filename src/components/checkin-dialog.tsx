@@ -9,7 +9,8 @@ const WANTS = ["quiet", "exercise", "friends", "creativity", "sleep", "outdoors"
 
 /**
  * Optional and brief (spec 8.3). Unanswered means unknown, never "plenty of
- * energy". Answers are private: plans may get lighter without saying why.
+ * energy". Answers are private: plans may get lighter without saying why,
+ * and "what would help" reorders this adult's own picks for this week only.
  */
 export function CheckinDialog({ onClose, weekKey }: { onClose: () => void; weekKey: string }) {
   const app = useApp();
@@ -50,6 +51,7 @@ export function CheckinDialog({ onClose, weekKey }: { onClose: () => void; weekK
         {scale("Pressure", pressure, setPressure, "light", "heavy")}
         <fieldset>
           <legend className="mb-1 text-sm font-medium text-ink-2">What would help?</legend>
+          <p className="mb-2 text-xs text-ink-3">Shapes your own suggestions this week only. To keep an idea coming, use &ldquo;Suggest it&rdquo; on Me.</p>
           <div className="flex flex-wrap gap-2">
             {WANTS.map((w) => (
               <button key={w} type="button" aria-pressed={wants.includes(w)} onClick={() => setWants(wants.includes(w) ? wants.filter((x) => x !== w) : [...wants, w])} className={cx("min-h-9 rounded-full border px-3 text-sm capitalize", wants.includes(w) ? "border-brand bg-brand-soft text-brand" : "border-line text-ink-2")}>

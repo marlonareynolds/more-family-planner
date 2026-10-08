@@ -1,6 +1,6 @@
 import { and, eq, gt, isNull, ne, or } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { accounts, children, helpers, memberships, moments } from "@/db/schema";
+import { accounts, checkins, children, helpers, memberships, moments } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import type { SuggestedTime } from "@/domain/free-time";
 import { choosePicks, pairSlots, slotMinutes } from "@/domain/picks";
@@ -52,6 +52,13 @@ export async function picksFor(
   const village = await db.select().from(helpers).where(and(eq(helpers.householdId, household.id), isNull(helpers.archivedAt))).orderBy(helpers.createdAt);
   const guidance = (await guidanceFor(db, actor)).effective as Record<string, { guidance: "allow" | "avoid" | "simplify" }>;
   const lighterWeek = await heavyWeek(db, actor, household.timeZone, now);
+  // This adult's own "what would help" from this week's private check-in:
+  // scoped to the week it was given for, read for nobody else's picks.
+  const [checkin] = await db
+    .select({ wants: checkins.wants })
+    .from(checkins)
+    .where(and(eq(checkins.accountId, actor.accountId), eq(checkins.weekKey, currentWeekKey(household.timeZone, now.getTime()))));
+  const moreOf = checkin?.wants ?? [];
   const recentRows = await db
     .select({ key: moments.activityKey })
     .from(moments)
@@ -71,7 +78,7 @@ export async function picksFor(
   const candidates = [...share(own), ...share(general)].filter((a) => slotMinutes(a) !== null);
   const week = currentWeekKey(household.timeZone, now.getTime());
   const seed = kind === "us" ? `${household.id}:${actor.accountId}:${week}` : `${household.id}:${week}`;
-  const chosen = choosePicks({ candidates, guidance, recent, lighterWeek, seed, count });
+  const chosen = choosePicks({ candidates, guidance, recent, lighterWeek, moreOf, seed, count });
 
   // One free-time search per length and time of day, shared between picks.
   const cache = new Map<string, Awaited<ReturnType<typeof freeTimesFor>>>();

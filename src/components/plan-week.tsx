@@ -3,6 +3,8 @@
 import { Coffee } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import type { DecisionItem } from "@/domain/decisions";
+import type { JobsView } from "@/server/queries/jobs";
 import type { WeekPick, WeekPicks } from "@/server/queries/picks";
 import type { WeekView } from "@/server/queries/week";
 import { useApp } from "./app-context";
@@ -10,6 +12,7 @@ import { AskHelperDialog } from "./ask-helper";
 import { fmtDate, fmtTime, localParts } from "./format";
 import { Badge, Button, Card, Checkbox, ChoiceCard, EmptyState, ErrorNote, SectionTitle, inputClass } from "./ui";
 import { useCommand } from "./use-command";
+import { DecisionReview } from "./decision-review";
 import { careLine, costLine, endDateOf } from "./week-picks";
 
 type Kind = "me" | "family";
@@ -24,7 +27,7 @@ const HEADINGS: Record<Kind, { title: string; hint: string }> = {
  * two of you is deliberately not on the list: the plan only says, as a
  * fact, which evenings are free for you both.
  */
-export function PlanWeekFlow({ week, picks, freeEvenings = [] }: { week: WeekView; picks: Partial<Record<Kind, WeekPicks>>; freeEvenings?: string[] }) {
+export function PlanWeekFlow({ week, picks, freeEvenings = [], review }: { week: WeekView; picks: Partial<Record<Kind, WeekPicks>>; freeEvenings?: string[]; review?: { items: DecisionItem[]; week: WeekView; jobs: JobsView } }) {
   const app = useApp();
   const { run, pending, error } = useCommand(app.householdId);
   const kinds = (Object.keys(picks) as Kind[]).filter((k) => picks[k]!.picks.some((p) => p.slot));
@@ -35,6 +38,7 @@ export function PlanWeekFlow({ week, picks, freeEvenings = [] }: { week: WeekVie
   const [askPartner, setAskPartner] = useState(true);
   const [chosenBy, setChosenBy] = useState("");
   const [sent, setSent] = useState<{ kind: Kind; pick: WeekPick }[] | null>(null);
+  const [finishing, setFinishing] = useState(false);
   const [asking, setAsking] = useState<WeekPick | null>(null);
 
   const partner = app.partner;
@@ -70,12 +74,24 @@ export function PlanWeekFlow({ week, picks, freeEvenings = [] }: { week: WeekVie
     if (await run("PlanWeek", { weekKey: week.weekKey, items }, { expected: { membershipRevision: app.membershipRevision } })) setSent(selected);
   }
 
+  // The review can end with no new plans: the decisions above saved as they
+  // were made, and leaving the rest of the week empty is a fine answer.
+  async function finishAsItIs() {
+    setFinishing(true);
+    if (await run("PlanWeek", { weekKey: week.weekKey, items: [] }, { expected: { membershipRevision: app.membershipRevision } })) setSent([]);
+    setFinishing(false);
+  }
+
   if (sent) {
     const needHelp = sent.filter((s) => s.kind === "me" && (s.pick.carer.kind === "helper" || s.pick.carer.kind === "none"));
     return (
       <div className="max-w-2xl">
         <h1 className="font-display text-3xl">That&apos;s the week</h1>
-        <p className="mt-2 text-ink-2">{partner ? `${partner.displayName} will get a notification and can answer everything in one go.` : "It's in the diary."}</p>
+        {sent.length === 0 ? (
+          <p className="mt-2 text-ink-2">No new plans this week. Everything you answered above is already saved{partner ? `, and ${partner.displayName} isn't sent anything new` : ""}.</p>
+        ) : (
+          <p className="mt-2 text-ink-2">{partner ? `${partner.displayName} will get a notification and can answer everything in one go.` : "It's in the diary."}</p>
+        )}
         <ul className="mt-4 flex flex-col gap-2">
           {sent.map(({ kind, pick }) => (
             <li key={kind}><Card tone={kind}><strong>{pick.activity.title}</strong> <span className="text-ink-3">· {fmtDate(pick.slot!.date)} {pick.slot!.startTime}</span></Card></li>
@@ -96,10 +112,17 @@ export function PlanWeekFlow({ week, picks, freeEvenings = [] }: { week: WeekVie
   return (
     <div className="max-w-2xl">
       <h1 className="font-display text-3xl">Plan the week of {fmtDate(week.weekKey, { weekday: false, month: "long" })}</h1>
-      <p className="mt-1 text-ink-2">About ten minutes. See what&apos;s on, pick one thing of each kind, and send it to {partner?.displayName ?? "the diary"} in one go.</p>
+      <p className="mt-1 text-ink-2">About ten minutes. Settle what needs deciding, see what&apos;s on, then add something new only if you want to{partner ? `, sent to ${partner.displayName} in one go` : ""}.</p>
       {week.planning.planned && week.planning.weekKey === week.weekKey && <p className="mt-2 rounded-xl bg-brand-soft px-3 py-2 text-sm text-brand">This week has already been planned. You can still add more.</p>}
 
-      <SectionTitle>1. What&apos;s already on</SectionTitle>
+      {review && (
+        <section id="decisions">
+          <SectionTitle>1. What needs deciding</SectionTitle>
+          <Card><DecisionReview items={review.items} week={review.week} jobs={review.jobs} /></Card>
+        </section>
+      )}
+
+      <SectionTitle>{review ? 2 : 1}. What&apos;s already on</SectionTitle>
       <Card className="flex flex-col gap-3">
         <ul className="grid grid-cols-7 gap-1 text-center text-xs" aria-label="Commitments per day">
           {busyDays.map((d) => (
@@ -110,13 +133,14 @@ export function PlanWeekFlow({ week, picks, freeEvenings = [] }: { week: WeekVie
             </li>
           ))}
         </ul>
+        <p className="-mt-1 text-xs text-ink-3">Timed entries in the diary each day. It doesn&apos;t show how full a day feels: cooking, homework and bedtime aren&apos;t counted.</p>
         {agreed.length > 0 && <p className="text-sm">Agreed: {agreed.map((m) => `${m.title} (${fmtDate(localParts(m.start, app.timeZone).date)} ${fmtTime(m.start, app.timeZone)})`).join(", ")}.</p>}
-        {answers.length > 0 && (
+        {!review && answers.length > 0 && (
           <p className="text-sm text-warn">
             {answers.length} plan{answers.length === 1 ? "" : "s"} waiting for your answer. <Link className="underline" href="/today">Answer</Link>
           </p>
         )}
-        {gaps.length > 0 ? (
+        {review ? null : gaps.length > 0 ? (
           <ul className="text-sm">
             {gaps.map((g, i) => (
               <li key={i} className="text-warn">{fmtDate(g.date)}: {g.childIds.map(app.childName).join(", ")} need{g.childIds.length === 1 ? "s" : ""} care ({g.reason}). <Link className="underline" href={`/holidays?date=${g.date}`}>Sort it</Link></li>
@@ -134,7 +158,7 @@ export function PlanWeekFlow({ week, picks, freeEvenings = [] }: { week: WeekVie
         const data = picks[k]!;
         return (
           <section key={k}>
-            <SectionTitle>{n + 2}. {HEADINGS[k].title}</SectionTitle>
+            <SectionTitle>{n + (review ? 3 : 2)}. {HEADINGS[k].title}</SectionTitle>
             <p className="-mt-2 mb-3 text-sm text-ink-3">{HEADINGS[k].hint}{data.lighterWeek ? " You said the week is heavy, so these start small." : ""}</p>
             <fieldset className="flex flex-col gap-2">
               <legend className="sr-only">{HEADINGS[k].title}</legend>
@@ -169,8 +193,12 @@ export function PlanWeekFlow({ week, picks, freeEvenings = [] }: { week: WeekVie
       })}
 
       <div className="shadow-lift sticky bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] z-30 mt-8 flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-surface/95 p-3 backdrop-blur md:bottom-4">
-        <span className="flex-1 text-sm text-ink-2">{selected.length ? `${selected.length} plan${selected.length === 1 ? "" : "s"}: ${selected.map((s) => s.pick.activity.title).join(", ")}` : "Nothing picked yet."}</span>
-        <Button variant="primary" disabled={pending || !selected.length} onClick={send}>{partner ? `Send to ${partner.displayName}` : "Add to the diary"}</Button>
+        <span className="flex-1 text-sm text-ink-2">{selected.length ? `${selected.length} plan${selected.length === 1 ? "" : "s"}: ${selected.map((s) => s.pick.activity.title).join(", ")}` : "No new plans picked. That's fine too."}</span>
+        {selected.length ? (
+          <Button variant="primary" disabled={pending} onClick={send}>{partner ? `Send to ${partner.displayName}` : "Add to the diary"}</Button>
+        ) : (
+          <Button variant="primary" disabled={pending || finishing} onClick={finishAsItIs}>Finish with no new plans</Button>
+        )}
       </div>
       <ErrorNote message={error?.message} />
       {!partner && <p className="mt-2 text-sm text-ink-3"><Badge>Tip</Badge> Invite your partner in Settings so they can answer.</p>}

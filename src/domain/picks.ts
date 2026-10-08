@@ -15,6 +15,13 @@ export interface PickInput {
   /** Activities done or planned recently: offered last, for variety. */
   recent: ReadonlySet<string>;
   lighterWeek: boolean;
+  /**
+   * What the viewer said they want more of in this week's private check-in.
+   * It nudges the order of their own picks only; it never brings back an
+   * idea they asked to avoid, and an explicit "more like this" still counts
+   * for more. Next week it no longer applies.
+   */
+  moreOf?: readonly string[];
   /** Changes weekly so the same household sees different picks each week. */
   seed: string;
   count: number;
@@ -24,6 +31,20 @@ function hash(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
   return h >>> 0;
+}
+
+/** Check-in wants ("What would help?") and the ideas that answer them. "couple time" and "family time" say which space, not which idea, so they change no order. */
+const WANT_MATCH: Record<string, (a: Activity) => boolean> = {
+  quiet: (a) => a.sensoryLoad === "low" && (a.category === "cosy" || a.setting === "home"),
+  exercise: (a) => a.category === "active",
+  friends: (a) => a.key === "me-friend",
+  creativity: (a) => a.category === "making" || a.category === "art" || a.category === "music",
+  sleep: (a) => a.key === "me-lie-in" || a.key === "me-nothing" || a.key === "me-bath",
+  outdoors: (a) => a.setting === "outdoors",
+};
+
+export function wantMatches(want: string, a: Activity): boolean {
+  return WANT_MATCH[want]?.(a) ?? false;
 }
 
 export function choosePicks(input: PickInput): Activity[] {
@@ -36,6 +57,7 @@ export function choosePicks(input: PickInput): Activity[] {
       // A place the family already knows and likes beats a general idea.
       if (a.local) score += 1;
       if (input.lighterWeek) score += a.preparation === "low" ? 1 : a.simpler ? 0.3 : -1;
+      if (input.moreOf?.some((w) => wantMatches(w, a))) score += 1;
       return { a, score };
     })
     .sort((x, y) => y.score - x.score);
