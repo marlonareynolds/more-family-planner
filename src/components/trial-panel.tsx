@@ -14,6 +14,8 @@ export interface TrialAnswer {
   minutesInApp: number | null;
   minutesOutside: number | null;
   fairlyAgreed: number | null;
+  restoredTime: number | null;
+  lessToCarry: number | null;
   continueChoice: "yes" | "unsure" | "no" | null;
   helped: string;
   friction: string;
@@ -44,7 +46,7 @@ const EVENT_LABELS: Record<string, string> = {
 
 const blank = (weekKey: string): TrialAnswer => ({
   weekKey, baseline: false, meMoments: null, usMoments: null, familyMoments: null, minutesInApp: null, minutesOutside: null,
-  fairlyAgreed: null, continueChoice: null, helped: "", friction: "", shareWithTrial: false,
+  fairlyAgreed: null, restoredTime: null, lessToCarry: null, continueChoice: null, helped: "", friction: "", shareWithTrial: false,
 });
 
 /** Weekly trial questions (spec 21.2) and what the trial has seen so far. */
@@ -64,6 +66,22 @@ export function TrialPanel({ data }: { data: TrialPanelData }) {
           onChange={(e) => set(k, e.target.value === "" ? null : Math.max(0, Math.round(Number(e.target.value))))} />
       )}
     </Field>
+  );
+
+  const scale = (label: string, k: "fairlyAgreed" | "restoredTime" | "lessToCarry", low: string, high: string) => (
+    <fieldset>
+      <legend className="mb-1 text-sm font-medium text-ink-2">{label}</legend>
+      <div className="flex items-center gap-1">
+        <span className="text-xs text-ink-3">{low}</span>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button key={n} type="button" aria-pressed={form[k] === n} onClick={() => set(k, form[k] === n ? null : n)}
+            className={cx("size-10 rounded-full border text-sm", form[k] === n ? "border-brand bg-brand-soft text-brand" : "border-line")}>
+            {n}
+          </button>
+        ))}
+        <span className="text-xs text-ink-3">{high}</span>
+      </div>
+    </fieldset>
   );
 
   return (
@@ -89,19 +107,9 @@ export function TrialPanel({ data }: { data: TrialPanelData }) {
           {num("In More", "minutesInApp")}
           {num("Outside More", "minutesOutside", "Messages, calls, other calendars")}
         </fieldset>
-        <fieldset>
-          <legend className="mb-1 text-sm font-medium text-ink-2">Did care and preparation feel fairly agreed?</legend>
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-ink-3">not at all</span>
-            {[1, 2, 3, 4, 5].map((n) => (
-              <button key={n} type="button" aria-pressed={form.fairlyAgreed === n} onClick={() => set("fairlyAgreed", form.fairlyAgreed === n ? null : n)}
-                className={cx("size-10 rounded-full border text-sm", form.fairlyAgreed === n ? "border-brand bg-brand-soft text-brand" : "border-line")}>
-                {n}
-              </button>
-            ))}
-            <span className="text-xs text-ink-3">completely</span>
-          </div>
-        </fieldset>
+        {scale("Did care and preparation feel fairly agreed?", "fairlyAgreed", "not at all", "completely")}
+        {scale("Did More help you get time that restored you?", "restoredTime", "not at all", "a lot")}
+        {scale("Did you feel less responsible for remembering and chasing everything?", "lessToCarry", "no less", "much less")}
         <div>
           <p className="mb-1 text-sm font-medium text-ink-2">Would you choose to keep using More?</p>
           <Segmented label="Keep using More" value={form.continueChoice ?? ("" as never)} onChange={(v) => set("continueChoice", v)}
@@ -173,6 +181,8 @@ function AnswerCard({ r, who }: { r: TrialAnswer; who: string }) {
         Moments: {moments.map((m) => m ?? "–").join(" / ")} (you, couple, family)
         {r.minutesInApp !== null || r.minutesOutside !== null ? ` · ${minutes} min organising` : ""}
         {r.fairlyAgreed ? ` · fairness ${r.fairlyAgreed}/5` : ""}
+        {r.restoredTime ? ` · restoring time ${r.restoredTime}/5` : ""}
+        {r.lessToCarry ? ` · less to remember ${r.lessToCarry}/5` : ""}
         {r.continueChoice ? ` · keep using: ${r.continueChoice}` : ""}
       </p>
       {r.helped && <p className="mt-1 text-sm">Helped: {r.helped}</p>}

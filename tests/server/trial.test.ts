@@ -62,4 +62,29 @@ describe("trial instrumentation (spec 21)", () => {
     expect((await trialFor(w.db, w.alex, w.householdId)).shared).toHaveLength(0);
     expect((await exportAccount(w.db, w.sam)).trialResponses).toHaveLength(1);
   });
+
+  it("asks each adult the two outcome questions separately and keeps the answers private unless shared", async () => {
+    const w = await newWorld();
+    await w.run(w.alex, "SaveTrialResponse", { weekKey: "2030-10-07", restoredTime: 2, lessToCarry: 1, fairlyAgreed: 3, continueChoice: "unsure" });
+    await w.run(w.sam, "SaveTrialResponse", { weekKey: "2030-10-07", restoredTime: 5, lessToCarry: 4 });
+    await expectCode(w.run(w.alex, "SaveTrialResponse", { weekKey: "2030-10-07", restoredTime: 6 }), "VALIDATION");
+    await expectCode(w.run(w.alex, "SaveTrialResponse", { weekKey: "2030-10-07", lessToCarry: 0 }), "VALIDATION");
+
+    const alexView = await trialFor(w.db, w.alex, w.householdId);
+    expect(alexView.mine.map((r) => [r.restoredTime, r.lessToCarry, r.fairlyAgreed, r.continueChoice])).toEqual([[2, 1, 3, "unsure"]]);
+    // Sam's answers exist but Alex sees only that Sam answered, not what.
+    expect(alexView.shared).toHaveLength(0);
+    expect(alexView.coverage.find((c) => c.accountId === w.sam.accountId)?.weeks).toEqual(["2030-10-07"]);
+    expect(JSON.stringify(alexView)).not.toMatch(/"restoredTime":5|"lessToCarry":4/);
+
+    // Unanswered stays unknown, never a score.
+    await w.run(w.alex, "SaveTrialResponse", { weekKey: "2030-09-30" });
+    const blank = (await trialFor(w.db, w.alex, w.householdId)).mine.find((r) => r.weekKey === "2030-09-30");
+    expect([blank?.restoredTime, blank?.lessToCarry]).toEqual([null, null]);
+
+    // Only a deliberate share shows them to the partner.
+    await w.run(w.sam, "SaveTrialResponse", { weekKey: "2030-10-07", restoredTime: 5, lessToCarry: 4, shareWithTrial: true });
+    expect((await trialFor(w.db, w.alex, w.householdId)).shared.map((r) => [r.restoredTime, r.lessToCarry])).toEqual([[5, 4]]);
+    expect((await exportAccount(w.db, w.sam)).trialResponses[0]).toMatchObject({ restoredTime: 5, lessToCarry: 4 });
+  });
 });

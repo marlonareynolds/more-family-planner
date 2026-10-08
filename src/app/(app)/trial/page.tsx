@@ -9,7 +9,7 @@ export const metadata = { title: "Trial" };
 
 const plain = (r: TrialResponse): TrialAnswer => ({
   weekKey: r.weekKey, baseline: r.baseline, meMoments: r.meMoments, usMoments: r.usMoments, familyMoments: r.familyMoments,
-  minutesInApp: r.minutesInApp, minutesOutside: r.minutesOutside, fairlyAgreed: r.fairlyAgreed, continueChoice: r.continueChoice,
+  minutesInApp: r.minutesInApp, minutesOutside: r.minutesOutside, fairlyAgreed: r.fairlyAgreed, restoredTime: r.restoredTime, lessToCarry: r.lessToCarry, continueChoice: r.continueChoice,
   helped: r.helped, friction: r.friction, shareWithTrial: r.shareWithTrial,
 });
 

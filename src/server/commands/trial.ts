@@ -24,6 +24,8 @@ export const saveTrialResponse = defineCommand({
     minutesInApp: count(6000),
     minutesOutside: count(6000),
     fairlyAgreed: z.number().int().min(1).max(5).nullable().default(null),
+    restoredTime: z.number().int().min(1).max(5).nullable().default(null),
+    lessToCarry: z.number().int().min(1).max(5).nullable().default(null),
     continueChoice: z.enum(["yes", "unsure", "no"]).nullable().default(null),
     helped: shortText(1000).default(""),
     friction: shortText(1000).default(""),
