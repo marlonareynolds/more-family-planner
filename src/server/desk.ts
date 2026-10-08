@@ -5,7 +5,7 @@ import type { Temporal } from "@js-temporal/polyfill";
 import { accounts, deskItems, events, holidayPeriods, households, jobs, trips } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import { addDays, instantToLocal } from "@/domain/time";
-import { dayTitleKey } from "@/lib/desk-keys";
+import { dayTitleKey, LETTER_HEADING } from "@/lib/desk-keys";
 import type { Actor } from "./auth";
 import { householdFor } from "./queries/week";
 
@@ -71,6 +71,18 @@ export interface DeskTarget {
   endTime: string | null;
   /** A repeating entry is changed in the diary, never replaced from a letter. */
   recurring: boolean;
+  /**
+   * Jobs hang off this entry (a collection, a payment). The Desk won't move
+   * an entry from under them: it is changed in the diary and Jobs together,
+   * so a pickup someone agreed to is never quietly left at the old time.
+   */
+  linkedJobs: number;
+  /**
+   * The entry's notes hold lines with no "From the letter:" heading: an
+   * earlier read's instructions mixed with the person's own. The Desk can't
+   * tell which to replace, so the person sorts them out in the diary.
+   */
+  mixedNotes: boolean;
 }
 
 export type DeskStatus =
@@ -109,6 +121,8 @@ export async function deskTarget(db: DbOrTx, householdId: string, viewerId: stri
       endDate: end.toPlainDate().toString(),
       endTime: e.allDay ? null : clock(end),
       recurring: e.rule !== null,
+      linkedJobs: await jobsFor(db, householdId, "event", e.id),
+      mixedNotes: e.notes.trim() !== "" && !e.notes.split("\n").includes(LETTER_HEADING),
     };
   }
   if (type === "trip") {
@@ -116,16 +130,21 @@ export async function deskTarget(db: DbOrTx, householdId: string, viewerId: stri
     if (!t) return null;
     const s = instantToLocal(t.startAt.getTime(), timeZone);
     const e = instantToLocal(t.endAt.getTime(), timeZone);
-    return { targetType: "trip", targetId: t.id, version: t.version, startDate: s.toPlainDate().toString(), startTime: clock(s), endDate: e.toPlainDate().toString(), endTime: clock(e), recurring: false };
+    return { targetType: "trip", targetId: t.id, version: t.version, startDate: s.toPlainDate().toString(), startTime: clock(s), endDate: e.toPlainDate().toString(), endTime: clock(e), recurring: false, linkedJobs: await jobsFor(db, householdId, "trip", t.id), mixedNotes: false };
   }
   if (type === "holiday") {
     const [h] = await db.select().from(holidayPeriods).where(and(eq(holidayPeriods.id, id), eq(holidayPeriods.householdId, householdId), isNull(holidayPeriods.archivedAt)));
     if (!h) return null;
-    return { targetType: "holiday", targetId: h.id, version: h.version, startDate: h.startDate, startTime: null, endDate: addDays(h.endDateExclusive, -1), endTime: null, recurring: false };
+    return { targetType: "holiday", targetId: h.id, version: h.version, startDate: h.startDate, startTime: null, endDate: addDays(h.endDateExclusive, -1), endTime: null, recurring: false, linkedJobs: 0, mixedNotes: false };
   }
   const [j] = await db.select().from(jobs).where(and(eq(jobs.id, id), eq(jobs.householdId, householdId), isNull(jobs.archivedAt)));
   if (!j) return null;
-  return { targetType: "job", targetId: j.id, version: j.version, startDate: j.startsOn, startTime: j.dueTime, endDate: j.startsOn, endTime: null, recurring: j.cadence !== "once" };
+  return { targetType: "job", targetId: j.id, version: j.version, startDate: j.startsOn, startTime: j.dueTime, endDate: j.startsOn, endTime: null, recurring: j.cadence !== "once", linkedJobs: 0, mixedNotes: false };
+}
+
+async function jobsFor(db: DbOrTx, householdId: string, type: "event" | "trip", id: string) {
+  const rows = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.householdId, householdId), eq(jobs.forType, type), eq(jobs.forId, id), isNull(jobs.archivedAt)));
+  return rows.length;
 }
 
 /** The desk rows this person may know about: shared ones and their own "just for me" ones. */

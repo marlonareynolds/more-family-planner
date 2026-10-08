@@ -8,7 +8,7 @@
  * `identityKey`: that plus the first date and start time (two sessions, on two
  * days or one after the other, stay distinct).
  * `detailKey`: that plus times, end date, place, details, arrival time and
- * repeats: everything the letter decides, so a changed notice is told apart
+ * repeats and collection time: everything the letter decides, so a changed notice is told apart
  * from a repeat of the same one.
  * `scope` is the adder's id for a "just for me" item, so it never matches,
  * or collides with, anyone else's.
@@ -28,6 +28,8 @@ export interface KeyFields {
   arriveBy?: string | null;
   repeat?: string | null;
   repeatUntil?: string | null;
+  /** When the children must be collected, for a pickup. */
+  collectAt?: string | null;
 }
 
 /**
@@ -67,11 +69,32 @@ export async function deskKeys(householdId: string, i: KeyFields, scope: string 
   const children = [...new Set(i.childIds)].sort().join(",");
   const seriesKey = await sha(householdId, scope ?? "shared", i.kind, normTitle(i.title), children);
   const identityKey = await sha(seriesKey, i.startDate, i.allDay ? "all-day" : (i.startTime ?? ""));
-  const detailKey = await sha(identityKey, i.endDate, i.allDay ? "all-day" : `${i.startTime ?? ""}-${i.endTime ?? ""}`, normTitle(i.location), normTitle(i.details), i.arriveBy ?? "", i.repeat ?? "", i.repeatUntil ?? "");
+  const detailKey = await sha(identityKey, i.endDate, i.allDay ? "all-day" : `${i.startTime ?? ""}-${i.endTime ?? ""}`, normTitle(i.location), normTitle(i.details), i.arriveBy ?? "", i.repeat ?? "", i.repeatUntil ?? "",
+    // Only when there is one, so items without a pickup keep the fingerprints they were stored with.
+    ...(i.collectAt ? [`collect ${i.collectAt}`] : []));
   return { seriesKey, identityKey, detailKey };
 }
 
 /** A hand-made diary entry with this title on this day, for "looks like it's already there". */
 export function dayTitleKey(householdId: string, date: string, title: string): Promise<string> {
   return sha(householdId, "day", date, normTitle(title));
+}
+
+/**
+ * The heading above the lines the Desk writes into an entry's notes. Lines
+ * under it belong to the letter and are replaced whole when a changed letter
+ * is applied; anything above it, or after the last "• " line, is the
+ * person's own and is kept.
+ */
+export const LETTER_HEADING = "From the letter:";
+
+/** Put the letter's current lines into notes, replacing the letter's earlier ones and keeping the person's own. */
+export function withLetterLines(existing: string, lines: string[]): string {
+  const block = lines.length ? [LETTER_HEADING, ...lines.map((l) => `• ${l}`)] : [];
+  const all = existing === "" ? [] : existing.split("\n");
+  const at = all.indexOf(LETTER_HEADING);
+  if (at === -1) return [...all, ...block].join("\n");
+  let end = at + 1;
+  while (end < all.length && all[end].startsWith("• ")) end++;
+  return [...all.slice(0, at), ...block, ...all.slice(end)].join("\n");
 }

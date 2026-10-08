@@ -203,4 +203,32 @@ describe("Household desk AI reader", () => {
     expect(row).toMatchObject({ state: "settled" });
     expect(row.actualCostMinor).toBe(row.maxCostMinor);
   });
+
+  /** A clock that reads each value in turn: deadline, count's limit, before reserving, after reserving. */
+  const steps = (...ts: number[]) => {
+    let n = 0;
+    return () => ts[Math.min(n++, ts.length - 1)];
+  };
+
+  it("R4: time spent waiting to reserve comes off the read's own time limit", async () => {
+    process.env.DESK_AI_MONTHLY_CAP_PENCE = "100000";
+    const w = await newWorld();
+    const timeouts: number[] = [];
+    const read: ReadFn = async (_, ms) => (timeouts.push(ms), { items: [fair], usage });
+    // 5s counting, then 45s waiting for the reservation: 40s of the 90s are left.
+    await readWithAi(w.db, w.alex, input(w.householdId), read, undefined, counted(), steps(0, 0, 5_000, 50_000));
+    expect(timeouts).toEqual([40_000]);
+  });
+
+  it("R4: a reservation wait that uses up the time sends nothing and releases the reservation", async () => {
+    process.env.DESK_AI_MONTHLY_CAP_PENCE = "100000";
+    const w = await newWorld();
+    let called = false;
+    const read: ReadFn = async () => ((called = true), { items: [fair], usage });
+    // 5s counting leaves enough to reserve, but the reservation lands at 80s: 10s is too little to read.
+    await expectCode(readWithAi(w.db, w.alex, input(w.householdId), read, undefined, counted(), steps(0, 0, 5_000, 80_000)), "FEATURE_DISABLED");
+    expect(called).toBe(false);
+    const [row] = await w.db.select().from(usageReservations);
+    expect(row).toMatchObject({ state: "released" });
+  });
 });

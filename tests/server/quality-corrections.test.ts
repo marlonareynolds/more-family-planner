@@ -273,3 +273,142 @@ describe("weather alerts never give a surprise away (priority 1, now exercised)"
     expect(JSON.stringify(toSam)).not.toMatch(/SECRET|woodland|Indoor den|rain/i);
   });
 });
+
+/*
+ * Marlon's second review of PR #11 (2026-10-08 10:29 UTC): R1–R3. Each test
+ * reproduces a finding against 7f1ce52.
+ */
+
+describe("R1: a private pickup never reaches the other adult", () => {
+  it("a 'just for me' pickup or job is refused on the server, and nothing lands", async () => {
+    const w = await newWorld();
+    const mia = (await w.run(w.alex, "AddChild", { preferredName: "Mia", ageBand: "5-7" })).childId;
+    const secret = card({ title: "SECRET spa day", allDay: true, startTime: null, endTime: null, location: "", details: "", childIds: [mia], justMe: true, collect: "partner", collectAt: "12:30" });
+    await expectCode(imp(w, w.alex, [secret]), "VALIDATION");
+    await expectCode(imp(w, w.alex, [{ ...secret, collect: "me" }]), "VALIDATION");
+    await expectCode(imp(w, w.alex, [{ ...secret, collect: "none" }]), "VALIDATION");
+    await expectCode(imp(w, w.alex, [card({ kind: "job", title: "SECRET deposit", justMe: true, endTime: null })]), "VALIDATION");
+    expect(await liveEvents(w)).toEqual([]);
+    expect(await w.db.select().from(jobs)).toEqual([]);
+    // Without the pickup it stays private, as before.
+    await imp(w, w.alex, [{ ...secret, collect: null, collectAt: null }]);
+    expect((await liveEvents(w))[0].visibility).toBe("private");
+  });
+
+  it("the partner's jobs, notifications and export carry no private title; the shared care need stays", async () => {
+    const w = await newWorld();
+    const mia = (await w.run(w.alex, "AddChild", { preferredName: "Mia", ageBand: "5-7" })).childId;
+    // Alex's private plan that day, and the school's early close asking Sam to collect.
+    await imp(w, w.alex, [card({ ref: "p", title: "SECRET spa day", startDate: "2026-11-12", endDate: "2026-11-12", startTime: "11:00", endTime: "16:00", location: "", details: "", justMe: true })]);
+    await imp(w, w.alex, [card({ ref: "k", title: "School closes early", allDay: true, startTime: null, endTime: null, location: "", details: "", childIds: [mia], collect: "partner", collectAt: "12:30" })]);
+    await processOutbox(w.db, new Date(Date.now() + 60_000));
+
+    const forSam = await jobsFor(w.db, w.sam, NOW);
+    expect(forSam.jobs[0]).toMatchObject({ title: "Collect Mia at 12:30", dueTime: "12:30", startsOn: "2026-11-12", proposedOwnerId: w.sam.accountId, forTitle: "School closes early" });
+    expect(JSON.stringify(forSam)).not.toMatch(/SECRET|spa/i);
+    const toSam = await w.db.select().from(notifications).where(eq(notifications.accountId, w.sam.accountId));
+    expect(toSam.length).toBeGreaterThan(0);
+    expect(JSON.stringify(toSam)).not.toMatch(/SECRET|spa/i);
+    const { exportHousehold } = await import("@/server/queries/exports");
+    expect(JSON.stringify(await exportHousehold(w.db, w.sam))).not.toMatch(/SECRET|spa/i);
+  });
+});
+
+describe("R2: a pickup's collection is never left at the old time", () => {
+  const pickup = (mia: string, over: Record<string, unknown> = {}) =>
+    card({ title: "School closes early", allDay: true, startTime: null, endTime: null, location: "", details: "", childIds: [mia], collect: "partner", collectAt: "13:30", ...over });
+  const setup = async () => {
+    const w = await newWorld();
+    const mia = (await w.run(w.alex, "AddChild", { preferredName: "Mia", ageBand: "5-7" })).childId;
+    await imp(w, w.alex, [pickup(mia)]);
+    return { w, mia };
+  };
+
+  it("a change to the collection time alone is offered for review, not called already there", async () => {
+    const { w, mia } = await setup();
+    expect((await statusOf(w, w.alex, pickup(mia))).status).toBe("added");
+    expect(await statusOf(w, w.alex, pickup(mia, { collectAt: "12:30" }))).toMatchObject({ status: "changed", current: { linkedJobs: 1 } });
+  });
+
+  it("after the partner agreed, a moved date can't be applied from the letter; the job and its yes stay as they were", async () => {
+    const { w, mia } = await setup();
+    const asked = (await jobsFor(w.db, w.sam, NOW)).jobs[0];
+    await w.run(w.sam, "AnswerJobOwner", { jobId: asked.id, version: asked.version, accept: true });
+    const moved = pickup(mia, { startDate: "2026-11-13", endDate: "2026-11-13" });
+    const s = (await statusOf(w, w.alex, moved)) as Extract<DeskStatus, { status: "possible" }>;
+    expect(s).toMatchObject({ status: "possible", candidates: [{ linkedJobs: 1 }] });
+    await expectCode(imp(w, w.alex, [{ ...moved, action: "update", targetId: s.candidates[0].targetId, targetVersion: s.candidates[0].version }]), "VALIDATION");
+    expect((await liveEvents(w))[0].localStart.slice(0, 10)).toBe("2026-11-12");
+    expect((await jobsFor(w.db, w.alex, NOW)).jobs[0]).toMatchObject({ startsOn: "2026-11-12", dueTime: "13:30", ownerId: w.sam.accountId, remindDayBefore: true });
+  });
+
+  it("while the request is still waiting, a changed collection time can't be applied either", async () => {
+    const { w, mia } = await setup();
+    const changed = pickup(mia, { collectAt: "12:30" });
+    const s = (await statusOf(w, w.alex, changed)) as Extract<DeskStatus, { status: "changed" }>;
+    await expectCode(imp(w, w.alex, [{ ...changed, action: "update", targetId: s.current.targetId, targetVersion: s.current.version }]), "VALIDATION");
+    expect((await jobsFor(w.db, w.sam, NOW)).jobs[0]).toMatchObject({ title: "Collect Mia at 13:30", dueTime: "13:30", proposedOwnerId: w.sam.accountId, awaitingMyAnswer: true });
+  });
+
+  it("a collection time corrected on the card before adding is the one the job and its reminder use", async () => {
+    const w = await newWorld();
+    const mia = (await w.run(w.alex, "AddChild", { preferredName: "Mia", ageBand: "5-7" })).childId;
+    // The reader said 13:30; the parent corrected it to 12:30 before adding.
+    await imp(w, w.alex, [pickup(mia, { collectAt: "12:30" })]);
+    expect((await jobsFor(w.db, w.sam, NOW)).jobs[0]).toMatchObject({ title: "Collect Mia at 12:30", dueTime: "12:30", startsOn: "2026-11-12", remindDayBefore: true });
+  });
+
+  it("a changed letter that adds a pickup to an entry with no job gets its collection", async () => {
+    const w = await newWorld();
+    const mia = (await w.run(w.alex, "AddChild", { preferredName: "Mia", ageBand: "5-7" })).childId;
+    await imp(w, w.alex, [pickup(mia, { collect: null, collectAt: null })]);
+    const changed = pickup(mia, { collect: "me", collectAt: "12:30" });
+    const s = (await statusOf(w, w.alex, changed)) as Extract<DeskStatus, { status: "changed" }>;
+    expect(s.current.linkedJobs).toBe(0);
+    await imp(w, w.alex, [{ ...changed, action: "update", targetId: s.current.targetId, targetVersion: s.current.version }]);
+    expect((await jobsFor(w.db, w.alex, NOW)).jobs[0]).toMatchObject({ title: "Collect Mia at 12:30", ownerId: w.alex.accountId });
+  });
+});
+
+describe("R3: a changed letter replaces its own instructions and keeps the parent's", () => {
+  const trip = (over: Record<string, unknown> = {}) => card({ startTime: "09:00", arriveBy: "08:45", details: "Bring £3 and a packed lunch", ...over });
+  const update = async (w: World, c: Card) => {
+    const s = (await statusOf(w, w.alex, c)) as Extract<DeskStatus, { status: "changed" }>;
+    expect(s.status).toBe("changed");
+    await imp(w, w.alex, [{ ...c, action: "update", targetId: s.current.targetId, targetVersion: s.current.version }]);
+  };
+
+  it("amount, arrival and kit change; only the current instructions stay; a manual note survives; repeating adds nothing", async () => {
+    const w = await newWorld();
+    await imp(w, w.alex, [trip()]);
+    const [e] = await liveEvents(w);
+    expect(e.notes).toBe("From the letter:\n• Bring £3 and a packed lunch\n• Arrive by 08:45; it starts at 09:00.");
+    await w.run(w.sam, "UpdateEvent", { eventId: e.id, version: e.version, fields: fieldsOf(e, { span: timed("2026-11-12", "08:45", "15:15"), notes: `Alex driving\n${e.notes}` }) });
+
+    const newer = trip({ arriveBy: "08:30", details: "Bring £5, a packed lunch and PE kit" });
+    await update(w, newer);
+    const [after] = await liveEvents(w);
+    expect(after.notes).toBe("Alex driving\nFrom the letter:\n• Bring £5, a packed lunch and PE kit\n• Arrive by 08:30; it starts at 09:00.");
+    expect(after.notes).not.toMatch(/£3|08:45/);
+    expect(after.localStart.slice(11, 16)).toBe("08:30");
+
+    // The same letter again is already there; forcing the update again changes nothing.
+    expect((await statusOf(w, w.alex, newer)).status).toBe("added");
+    const [again] = await liveEvents(w);
+    await w.run(w.alex, "UpdateEvent", { eventId: again.id, version: again.version, fields: fieldsOf(again, { span: timed("2026-11-12", "08:45", "15:15") }) });
+    await update(w, newer);
+    expect((await liveEvents(w))[0].notes).toBe(after.notes);
+  });
+
+  it("notes from before the heading existed are sorted out by hand, not guessed at", async () => {
+    const w = await newWorld();
+    await imp(w, w.alex, [trip()]);
+    const [e] = await liveEvents(w);
+    await w.db.update(events).set({ notes: "Bring £3 and a packed lunch\nAlex driving" }).where(eq(events.id, e.id));
+    const newer = trip({ details: "Bring £5" });
+    const s = (await statusOf(w, w.alex, newer)) as Extract<DeskStatus, { status: "changed" }>;
+    expect(s.current.mixedNotes).toBe(true);
+    await expectCode(imp(w, w.alex, [{ ...newer, action: "update", targetId: s.current.targetId, targetVersion: s.current.version }]), "VALIDATION");
+    expect((await liveEvents(w))[0].notes).toBe("Bring £3 and a packed lunch\nAlex driving");
+  });
+});

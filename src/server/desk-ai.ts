@@ -14,15 +14,17 @@ import type { Actor } from "./auth";
  * More keeps none of it. Nothing is added until the person ticks it.
  *
  * Off unless ANTHROPIC_API_KEY is set, and capped: every read reserves its
- * worst-case cost first, so the month's spend can't pass DESK_AI_MONTHLY_CAP_PENCE
- * (default £10) however many people read at once.
+ * worst-case cost first against DESK_AI_MONTHLY_CAP_PENCE (default £10), and
+ * a read that doesn't fit is not sent. The worst case rests on Anthropic's
+ * token count, which is an estimate, plus a margin and list prices at a
+ * cautious exchange rate: a close, conservative bound, not an exact one.
  */
 
 export const DESK_MODEL = "claude-opus-5-5";
 /**
  * The one model a refused read may move to. Pinned (not "default") so the
  * worst case is known: Anthropic bills each attempt separately, at the model
- * that ran it, so a hard cap must count both.
+ * that ran it, so the cap must count both.
  */
 export const DESK_FALLBACK_MODEL = "claude-opus-5";
 const MAX_OUTPUT_TOKENS = 16_000;
@@ -168,14 +170,25 @@ function monthStart(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
+/** The longest a read waits for another read's reservation before giving up on the AI. */
+export const RESERVE_WAIT_MS = 10_000;
+
 /**
  * Reserve the worst case against the month's cap, or refuse. Serialised with
- * an advisory lock so two reads can't both squeeze under the cap.
+ * an advisory lock so two reads can't both squeeze under the cap; the wait
+ * for that lock is bounded, so a stuck reservation can't eat the read's time.
  */
 export async function reserve(db: Db, householdId: string, maxPence: number, now = new Date()): Promise<string> {
   const requestId = `desk-${randomUUID()}`;
   await db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('more-desk-ai-cap'))`);
+    await tx.execute(sql.raw(`set local lock_timeout = '${RESERVE_WAIT_MS}ms'`));
+    try {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('more-desk-ai-cap'))`);
+    } catch (err) {
+      const e = err as { code?: string; cause?: { code?: string } };
+      if ((e?.code ?? e?.cause?.code) === "55P03") throw new DomainError("FEATURE_DISABLED", "The AI reader is busy just now, so this letter was read the simpler way.");
+      throw err;
+    }
     const [row] = await tx
       .select({
         spent: sql<string>`coalesce(sum(case when ${usageReservations.state} = 'settled' then ${usageReservations.actualCostMinor} when ${usageReservations.state} = 'reserved' then ${usageReservations.maxCostMinor} else 0 end), 0)`,
@@ -345,9 +358,15 @@ export async function readWithAi(
   if (left < MIN_READ_MS) throw new DomainError("FEATURE_DISABLED", "The AI reader was too slow just now, so this letter was read the simpler way.");
   const maxPence = worstCasePence(inputTokens);
   const requestId = await reserve(db, input.householdId, maxPence, now);
+  // Waiting for the reservation spends the same budget: look again before sending anything.
+  const remaining = deadline - clock();
+  if (remaining < MIN_READ_MS) {
+    await settle(db, requestId, null); // never sent, so nothing to bill
+    throw new DomainError("FEATURE_DISABLED", "The AI reader was too slow just now, so this letter was read the simpler way.");
+  }
   let answer: AiItem[];
   try {
-    const { items, usage } = await read(input, left);
+    const { items, usage } = await read(input, remaining);
     await settle(db, requestId, recorded(costPence(usage), maxPence));
     answer = items;
   } catch (err) {

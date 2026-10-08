@@ -326,3 +326,60 @@ test("the household desk reads a pasted letter on the phone and adds only what's
   await go(alex, "/holidays");
   await expect(alex.getByText("Half term", { exact: true })).toBeVisible();
 });
+
+test("a pickup from a letter: the parent corrects the time, the partner is asked and answers", async ({ browser }, info) => {
+  const tag = `${info.project.name}-p${Date.now().toString(36)}`;
+  const vp = info.project.name === "phone" ? { width: 412, height: 915 } : undefined;
+  const alex = await adult(browser, `Alex ${tag}`, vp);
+  await alex.getByLabel("Household name").fill(`Household ${tag}`);
+  await alex.getByRole("button", { name: "Start our household" }).click();
+  await alex.waitForURL(/\/welcome/);
+  await alex.getByLabel("Child 1 name").fill("Robin");
+  await alex.getByRole("button", { name: "Save and continue" }).click();
+  await expect(alex.getByRole("heading", { name: "School holidays" })).toBeVisible();
+  await go(alex, "/settings");
+  await alex.getByRole("button", { name: "Invite your partner" }).click();
+  const link = await alex.getByLabel("Invitation link").inputValue();
+  const sam = await adult(browser, `Sam ${tag}`, vp);
+  await go(sam, new URL(link).pathname);
+  await sam.getByRole("button", { name: /join/i }).click();
+  await sam.waitForURL(/\/welcome/);
+
+  // The letter says 2pm; the parent knows it's really 1.45pm and corrects it on the card.
+  const uk = (d: string) => d.split("-").reverse().join("/");
+  const letter = `Last day of term: school finishes at 2pm on ${uk(inDays(15))}.`;
+  await go(alex, "/desk");
+  await alex.getByLabel("Letter, email or booking").fill(letter);
+  await alex.getByRole("button", { name: "Read it" }).click();
+  const pickup = alex.getByRole("listitem").filter({ hasText: "Last day of term" });
+  await pickup.getByRole("radio", { name: "Add this" }).click();
+  await expect(pickup.getByText(/This changes a pickup: collection at 14:00\./)).toBeVisible();
+  await pickup.getByLabel("Collect at").fill("13:45");
+  await expect(pickup.getByText(/This changes a pickup: collection at 13:45\./)).toBeVisible();
+  await pickup.getByRole("radio", { name: `Ask Sam ${tag} to collect` }).click();
+  await expect(pickup.getByText(/gets a request in Jobs/)).toBeVisible();
+  // A collection is shared, so it can't be kept private.
+  await pickup.getByRole("button", { name: "Change details" }).click();
+  await expect(pickup.getByLabel("Keep this just for me")).toHaveCount(0);
+  await axe(alex);
+  await alex.getByRole("button", { name: "Add 1 thing" }).click();
+  await expect(alex.getByText("Added: Last day of term")).toBeVisible();
+
+  // Sam is asked, at the corrected time, and says yes.
+  await go(sam, "/jobs");
+  const ask = sam.getByRole("listitem").filter({ hasText: "Collect the children at 13:45" });
+  await expect(ask.getByText(/asked if you could take this on/)).toBeVisible();
+  await axe(sam);
+  await ask.getByRole("button", { name: "Yes, it's mine" }).click();
+  await expect(sam.getByRole("listitem").filter({ hasText: "Collect the children at 13:45" }).getByText("Yours")).toBeVisible();
+  await sam.screenshot({ path: `test-results/pickup-answer-${info.project.name}.png`, fullPage: true });
+
+  // Reading the letter again: the diary differs, but the Desk won't move it from under Sam's yes.
+  await go(alex, "/desk");
+  await alex.getByLabel("Letter, email or booking").fill(letter);
+  await alex.getByRole("button", { name: "Read it" }).click();
+  const again = alex.getByRole("listitem").filter({ hasText: "Last day of term" });
+  await expect(again.getByText(/A job hangs off it/)).toBeVisible();
+  await expect(again.getByRole("radio", { name: "Update the entry" })).toHaveCount(0);
+  await alex.screenshot({ path: `test-results/pickup-reread-${info.project.name}.png`, fullPage: true });
+});

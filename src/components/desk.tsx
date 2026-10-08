@@ -104,13 +104,22 @@ function keyFields(d: Draft): KeyFields {
     arriveBy: d.kind === "event" && !d.allDay && d.arriveBy ? d.arriveBy : null,
     repeat: d.kind === "event" ? d.repeat : null,
     repeatUntil: d.kind === "event" && d.repeat ? d.repeatUntil : null,
+    collectAt: d.pickupChange ? d.collectAt : null,
   };
 }
 
 /** The entry the card would change, if there is exactly one it can. */
 function updatable(d: Draft): DeskTarget | null {
   const t = d.dup?.status === "changed" ? d.dup.current : d.dup?.status === "possible" && d.dup.candidates.length === 1 ? d.dup.candidates[0] : null;
-  return t && !t.recurring && (t.targetType === "event" || t.targetType === "trip") ? t : null;
+  return t && !t.recurring && !t.linkedJobs && !t.mixedNotes && (t.targetType === "event" || t.targetType === "trip") ? t : null;
+}
+
+/** Why the Desk won't change an entry itself, and where to do it instead. */
+function byHand(t: DeskTarget): string {
+  if (t.recurring) return " It repeats, so change it in the diary if you need to.";
+  if (t.linkedJobs) return " A job hangs off it, such as a collection or payment, so change the entry in the diary and the job in Jobs. Whoever agreed to the job then sees the new time.";
+  if (t.mixedNotes) return " Its notes mix an earlier letter with your own, so change it in the diary.";
+  return "";
 }
 
 /**
@@ -241,7 +250,7 @@ export function DeskBoard({ ai = false }: { ai?: boolean }) {
           owner: d.owner ?? "none",
           forRef: forRef(d),
           collect: checks.some((c) => c.code === "pickup") ? d.collect : null,
-          collectAt: checks.some((c) => c.code === "pickup") ? d.collectAt : null,
+          collectAt: f.collectAt ?? null,
         };
       });
     const result = await run<{ results: { ref: string; outcome: "added" | "updated" | "already"; by?: string }[] }>("ImportDeskItems", { items }, { expected: { membershipRevision: app.membershipRevision }, refresh: false });
@@ -464,12 +473,12 @@ function dupLine(d: Draft): string {
   if (!dup) return "";
   if (dup.status === "added") return `Already in the diary: added by ${dup.by} on ${fmtDate(dup.on)}. It won't be added twice.`;
   if (dup.status === "changed") {
-    const tail = dup.current.recurring ? " It repeats, so change it in the diary if you need to." : "";
+    const tail = byHand(dup.current);
     return `Added by ${dup.by} on ${fmtDate(dup.on)}, but the letter and the diary differ now. The diary has ${targetWhen(dup.current)}.${tail}`;
   }
   if (dup.status === "possible") {
     const list = dup.candidates.map(targetWhen).join("; ");
-    const many = dup.candidates.length > 1 ? " To change one of those, do it in the diary." : dup.candidates[0].recurring ? " It repeats, so change it in the diary if it has moved." : "";
+    const many = dup.candidates.length > 1 ? " To change one of those, do it in the diary." : byHand(dup.candidates[0]);
     return dup.sameDay
       ? `“${d.title}” is already in the diary that day (${list}). Is this another session, or has the time changed?${many}`
       : `“${d.title}” is already in the diary on ${list}. Is this a new date for it, or another one?${many}`;
@@ -566,6 +575,9 @@ function DraftCard({ d, ctx, failed, onChange }: { d: Draft; ctx: { children: { 
             </p>
             {c.code === "pickup" && (
               <>
+                <Field label="Collect at" hint="Check this against the letter.">
+                  {(id, hint) => <input id={id} type="time" aria-describedby={hint} className={cx(inputClass, "max-w-40")} value={d.collectAt ?? ""} onChange={(e) => onChange({ collectAt: e.target.value || null })} />}
+                </Field>
                 <Segmented
                   label="Who collects"
                   value={d.collect ?? ("" as "me")}
@@ -644,7 +656,8 @@ function DraftCard({ d, ctx, failed, onChange }: { d: Draft; ctx: { children: { 
           ) : (
             <PeoplePicker label={d.kind === "trip" ? "Who's going" : "Who"} adultIds={d.adultIds} childIds={d.childIds} onChange={(v) => onChange({ adultIds: v.adultIds, childIds: v.childIds })} />
           )}
-          {d.kind === "event" && d.role !== "deadline" && app.adults.length > 1 && (
+          {/* A pickup's collection is a job both adults see, so it can't be kept private. */}
+          {d.kind === "event" && d.role !== "deadline" && !d.pickupChange && app.adults.length > 1 && (
             <Checkbox checked={d.justMe} onChange={(justMe) => onChange({ justMe })} label="Keep this just for me" hint="For a surprise: only you will see it." />
           )}
         </>

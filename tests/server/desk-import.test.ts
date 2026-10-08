@@ -162,7 +162,7 @@ describe("Household Desk duplicates and follow-through", () => {
     expect(trip.notes).toContain("Arrive by 08:30; it starts at 09:00.");
     const swim = rows.find((r) => r.title === "Swimming club")!;
     expect(swim.rule).toMatchObject({ freq: "WEEKLY", interval: 1, byDay: ["TU"], count: 10 });
-    expect(swim.notes).toBe("Goggles");
+    expect(swim.notes).toBe("From the letter:\n• Goggles");
   });
 
   it("a payment deadline becomes a job due by noon, linked to its trip, and asks the partner to pay", async () => {

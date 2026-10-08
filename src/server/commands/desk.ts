@@ -4,7 +4,7 @@ import { children, deskItems, events, trips } from "@/db/schema";
 import { DomainError } from "@/domain/errors";
 import { expand, WEEKDAYS, type RecurrenceRule } from "@/domain/recurrence";
 import { addDays, startOfLocalDate } from "@/domain/time";
-import { diaryTimes } from "@/lib/desk-keys";
+import { diaryTimes, withLetterLines } from "@/lib/desk-keys";
 import { defineCommand, type CommandContext } from "../pipeline";
 import { deskItemInput, deskKeys, deskTarget, type DeskItemInput } from "../desk";
 import { createHoliday } from "./care";
@@ -71,11 +71,24 @@ function ruleOf(ctx: CommandContext, i: ImportItem): RecurrenceRule | null {
   return { ...rule, count: Math.min(500, Math.max(1, n)) };
 }
 
-/** The letter's lines for the notes, without repeating any already there. */
-function letterNotes(i: ImportItem, existing = ""): string {
+/** What the letter says to do or bring, and what the Desk could not tell from it. */
+function letterLines(i: ImportItem): string[] {
   const times = diaryTimes(i);
-  const lines = [i.details, times.startTime && i.startTime && times.startTime !== i.startTime ? `Arrive by ${times.startTime}; it starts at ${i.startTime}.` : "", ...i.notes].filter(Boolean);
-  return [existing, ...lines.filter((l) => !existing.includes(l))].filter(Boolean).join("\n").slice(0, 2000);
+  const lines = [i.details, times.startTime && i.startTime && times.startTime !== i.startTime ? `Arrive by ${times.startTime}; it starts at ${i.startTime}.` : "", ...i.notes];
+  return [...new Set(lines.map((l) => l.replace(/\s*\n\s*/g, " ").trim()).filter(Boolean))];
+}
+
+/**
+ * The entry's notes with the letter's current lines under their own heading.
+ * A changed letter replaces that block whole, so only its current
+ * instructions stay (never £3 and £5 side by side); the person's own notes
+ * are kept. Notes from before the heading existed can't be told apart, so
+ * those entries are changed by hand in the diary.
+ */
+function letterNotes(i: ImportItem, existing = ""): string {
+  const notes = withLetterLines(existing, letterLines(i));
+  if (notes.length > 2000) throw new DomainError("VALIDATION", `“${i.title}” has too many notes to add the letter's. Shorten them in the diary first.`);
+  return notes;
 }
 
 function spanOf(i: ImportItem) {
@@ -127,7 +140,7 @@ async function create(ctx: CommandContext, i: ImportItem, linked: Map<string, Ta
     ctx,
     addJob.payload.parse({
       title: i.title,
-      notes: letterNotes(i).slice(0, 500),
+      notes: letterLines(i).join("\n").slice(0, 500),
       cadence: "once",
       startsOn: i.startDate,
       dueTime: i.startTime,
@@ -148,7 +161,8 @@ async function collection(ctx: CommandContext, i: ImportItem, event: Target) {
     ctx,
     addJob.payload.parse({
       title: `Collect ${names.length ? names.join(" and ") : "the children"}${at ? ` at ${at}` : ""}`.slice(0, 80),
-      notes: i.title,
+      // A job is seen by the whole household: it names the entry only when the entry is shared.
+      notes: i.justMe ? "" : i.title,
       cadence: "once",
       startsOn: i.startDate,
       dueTime: at,
@@ -174,6 +188,9 @@ async function update(ctx: CommandContext, i: ImportItem, target: Target) {
     throw new DomainError("CONFLICT", `“${i.title}” was changed in the diary after you checked. Read the letter again to see it as it is now.`);
   }
   if (seen.recurring) throw new DomainError("VALIDATION", `“${i.title}” repeats. Change it in the diary, where you can choose which dates.`);
+  // A collection or payment hangs off it: moving the entry alone would leave that job, and any yes to it, at the old time.
+  if (seen.linkedJobs) throw new DomainError("VALIDATION", `“${i.title}” has a job linked to it, such as a collection or payment. Change the entry in the diary and the job in Jobs, so whoever agreed to it sees the new time.`);
+  if (seen.mixedNotes) throw new DomainError("VALIDATION", `“${i.title}” has notes from an earlier read mixed with your own, so the Desk can't tell which to replace. Change it in the diary.`);
   if (target.type === "event") {
     const [row] = await ctx.tx.select().from(events).where(eq(events.id, target.id));
     const fields = addEvent.payload.parse({
@@ -213,6 +230,10 @@ export const importDeskItems = defineCommand({
     const ordered = [...p.items].sort((a, b) => Number(a.kind === "job") - Number(b.kind === "job"));
     for (const i of ordered) {
       try {
+        // Jobs are seen by both adults, so a "just for me" item can't have one: refuse rather than share it quietly.
+        if (i.justMe && (i.kind === "job" || i.collect)) {
+          throw new DomainError("VALIDATION", i.kind === "job" ? `“${i.title}” is a job, and jobs are shared with the household. Untick “Keep this just for me” to add it.` : `“${i.title}” has a pickup, and a collection is shared with the household. Untick “Keep this just for me” so the collection can be shared.`);
+        }
         const k = await deskKeys(ctx.household.id, i, scopeOf(i));
         const [existing] = await ctx.tx.select().from(deskItems).where(and(eq(deskItems.householdId, ctx.household.id), eq(deskItems.identityKey, k.identityKey)));
         const visible = existing && (!existing.privateTo || existing.privateTo === ctx.actor.accountId) ? await deskTarget(ctx.tx, ctx.household.id, ctx.actor.accountId, tz, existing.targetType, existing.targetId) : null;
@@ -227,6 +248,8 @@ export const importDeskItems = defineCommand({
           const [row] = await ctx.tx.select().from(deskItems).where(and(eq(deskItems.householdId, ctx.household.id), eq(deskItems.targetId, i.targetId), eq(deskItems.seriesKey, k.seriesKey)));
           if (!row || (row.privateTo && row.privateTo !== ctx.actor.accountId)) throw new DomainError("NOT_FOUND", `“${i.title}” could not be found in the diary. Add it as new instead.`);
           await update(ctx, i, { type: row.targetType, id: row.targetId });
+          // Nothing hung off it before (update refuses otherwise), so a pickup the changed letter adds gets its collection now.
+          if (i.collect && row.targetType === "event") await collection(ctx, i, { type: "event", id: row.targetId });
           // A moved notice may land on a date another row already claims; that row is the older copy.
           if (existing && existing.id !== row.id) await ctx.tx.delete(deskItems).where(eq(deskItems.id, existing.id));
           await ctx.tx.update(deskItems).set({ identityKey: k.identityKey, detailKey: k.detailKey, startDate: i.startDate, updatedAt: ctx.now }).where(eq(deskItems.id, row.id));
