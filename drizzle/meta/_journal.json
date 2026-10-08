@@ -113,6 +113,13 @@
       "when": 1791489575634,
       "tag": "0015_meals_shopping_checklists",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791490932448,
+      "tag": "0016_evening_and_spending_guide",
+      "breakpoints": true
     }
   ]
 }

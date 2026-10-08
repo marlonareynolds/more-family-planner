@@ -10,6 +10,7 @@ import { BookingLinks } from "./booking-links";
 import { MenuCard } from "./date-night";
 import { MomentEditor } from "./moment-editor";
 import { PlaceEditor } from "./places";
+import { RecoveryDialog } from "./recovery";
 import { Badge, Button, Card, Checkbox, Dialog, ErrorNote, Field, inputClass } from "./ui";
 import { useCommand } from "./use-command";
 
@@ -30,7 +31,7 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
   const [costOpen, setCostOpen] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskOwner, setTaskOwner] = useState(app.me.id);
-  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [recovering, setRecovering] = useState(false);
   const [asking, setAsking] = useState(false);
   const [savingPlace, setSavingPlace] = useState(false);
   // A good outing can become one of the household's places in one tap.
@@ -188,21 +189,14 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
           {m.lifecycle === "draft" && m.organiserId === app.me.id && (
             <Button size="sm" variant="ghost" onClick={() => run("DeleteDraft", { momentId: m.id, version: m.version })}>Delete draft</Button>
           )}
-          {m.lifecycle === "planned" && !past && (
-            confirmCancel ? (
-              <span className="flex items-center gap-2 text-sm">
-                {m.ritualId ? "Skip just this date? The rest stay." : "Cancel this plan? Payments are kept."}
-                <Button size="sm" variant="danger" onClick={() => run("CancelMoment", { momentId: m.id, version: m.version })}>{m.ritualId ? "Skip it" : "Cancel plan"}</Button>
-                <Button size="sm" variant="ghost" onClick={() => setConfirmCancel(false)}>Keep</Button>
-              </span>
-            ) : (
-              <Button size="sm" variant="ghost" onClick={() => setConfirmCancel(true)}>{m.ritualId ? "Skip this date…" : "Cancel…"}</Button>
-            )
+          {m.lifecycle === "planned" && !past && !m.detailsHidden && (
+            <Button size="sm" variant="ghost" onClick={() => setRecovering(true)}>Something&apos;s changed?</Button>
           )}
         </div>
       )}
 
       {editing && <MomentEditor open onClose={() => setEditing(false)} moment={m} defaultDate={date} />}
+      {recovering && <RecoveryDialog moment={m} onClose={() => setRecovering(false)} />}
       {reflecting && <ReflectDialog moment={m} onClose={() => setReflecting(false)} />}
       {savingPlace && (
         <PlaceEditor

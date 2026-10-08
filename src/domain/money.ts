@@ -90,3 +90,35 @@ export function assertRefundAllowed(summary: ExpenseSummary, refundMinor: number
     throw new DomainError("VALIDATION", "A refund cannot exceed what has been paid.");
   }
 }
+
+export interface WeekSpend {
+  /** Paid so far, less refunds. */
+  paidMinor: number;
+  /** Agreed but not yet paid. */
+  toPayMinor: number;
+  /** Only a guess so far: no amount agreed, nothing paid. */
+  estimatedMinor: number;
+  /** Everything known, each cost counted once at its firmest figure. */
+  knownMinor: number;
+  /** Costs entered with no amount at all: unknown, not free. */
+  unknownCosts: number;
+}
+
+/**
+ * The week's shared costs against a guide. Each cost counts once, at its
+ * firmest figure: what's been paid and what's still owed on an agreed
+ * amount, or else the estimate. A cost with no figure is unknown, which
+ * is not the same as free.
+ */
+export function weekSpend(costs: readonly Pick<ExpenseSummary, "estimateMinor" | "committedMinor" | "netPaidMinor" | "remainingMinor">[]): WeekSpend {
+  const out: WeekSpend = { paidMinor: 0, toPayMinor: 0, estimatedMinor: 0, knownMinor: 0, unknownCosts: 0 };
+  for (const c of costs) {
+    const paid = Math.max(0, c.netPaidMinor);
+    out.paidMinor += paid;
+    if (c.committedMinor !== null) out.toPayMinor += c.remainingMinor ?? Math.max(0, c.committedMinor - paid);
+    else if (paid === 0 && c.estimateMinor !== null) out.estimatedMinor += c.estimateMinor;
+    else if (paid === 0) out.unknownCosts += 1;
+  }
+  out.knownMinor = out.paidMinor + out.toPayMinor + out.estimatedMinor;
+  return out;
+}

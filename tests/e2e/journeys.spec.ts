@@ -510,3 +510,42 @@ test("dinner on a hard evening: save meals, choose tonight, ask the partner to c
   await sam.locator("#shopping").getByRole("checkbox", { name: /Milk/ }).check();
   await expect(sam.locator("#shopping").getByRole("checkbox", { name: /Milk/ })).toBeChecked();
 });
+
+test("a disrupted evening: set the household's evening, see costs against a guide, and let personal time go or get it back", async ({ browser }, info) => {
+  const tag = `${info.project.name}-f${Date.now().toString(36)}`;
+  const vp = info.project.name === "phone" ? { width: 412, height: 915 } : undefined;
+  const alex = await adult(browser, `Alex ${tag}`, vp);
+  await alex.getByLabel("Household name").fill(`Household ${tag}`);
+  await alex.getByRole("button", { name: "Start our household" }).click();
+  await alex.waitForURL(/\/welcome/);
+
+  // The household's own evening, and a weekly guide.
+  await go(alex, "/settings");
+  await alex.getByLabel("Family time usually ends").fill("18:30");
+  await alex.getByLabel("Children's bedtime (optional)").fill("19:45");
+  await alex.getByLabel("Weekly guide for shared plans, £ (optional)").fill("60");
+  const evenings = alex.locator("section").filter({ has: alex.getByRole("heading", { name: "Evenings and spending" }) });
+  await evenings.getByRole("button", { name: "Save" }).click();
+  await expect(evenings.getByText("Saved")).toBeVisible();
+  await go(alex, "/week");
+  await expect(alex.getByText(/£0.00 known of your £60.00 guide|£0 known of your £60 guide/)).toBeVisible();
+
+  // Some time for Alex, then a late shift: leave it out, and it waits on Me.
+  await go(alex, "/me");
+  await alex.getByRole("button", { name: "+ Plan something" }).click();
+  await alex.getByLabel("What", { exact: true }).fill("Swim");
+  await alex.getByLabel("Date").fill(inDays(2));
+  await alex.getByRole("button", { name: "Save as draft" }).click();
+  await alex.getByRole("button", { name: "Protect this time" }).click();
+  await expect(alex.getByRole("button", { name: "Protect this time" })).toHaveCount(0);
+  await alex.getByRole("button", { name: "Something's changed?" }).click();
+  const dialog = alex.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Another time" })).toBeVisible();
+  await axe(alex);
+  await alex.screenshot({ path: `test-results/recovery-${info.project.name}.png`, fullPage: true });
+  await dialog.getByRole("button", { name: "Leave it out" }).click();
+  await expect(alex.getByText("Time you gave up")).toBeVisible();
+  await expect(alex.getByRole("button", { name: "Plan it again" })).toBeVisible();
+  await alex.getByRole("button", { name: "Let it go" }).click();
+  await expect(alex.getByRole("button", { name: "Plan it again" })).toHaveCount(0);
+});

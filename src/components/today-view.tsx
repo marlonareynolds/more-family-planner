@@ -66,7 +66,7 @@ function whenLabel(m: { start: number }, today: string, tz: string): string {
   return `${fmtDate(date)} at ${time}`;
 }
 
-export function TodayView({ data, jobs, decisions, deskUsed = true, meals }: { data: WeekView; jobs?: JobsView; decisions?: { items: DecisionItem[]; until: string }; deskUsed?: boolean; meals?: MealsView }) {
+export function TodayView({ data, jobs, decisions, deskUsed = true, meals, dinnerOffer }: { data: WeekView; jobs?: JobsView; decisions?: { items: DecisionItem[]; until: string }; deskUsed?: boolean; meals?: MealsView; dinnerOffer?: string }) {
   const app = useApp();
   const router = useRouter();
   const now = useNow();
@@ -289,7 +289,7 @@ export function TodayView({ data, jobs, decisions, deskUsed = true, meals }: { d
       )}
 
       {decisions && <DecisionSummary items={decisions.items} until={decisions.until} />}
-      {meals && <TonightDinner data={meals} />}
+      {meals && <TonightDinner data={meals} offer={dinnerOffer} />}
 
       {jobs && <JobsToday data={jobs} />}
 

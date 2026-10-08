@@ -111,6 +111,7 @@ export async function freeTimesFor(db: Db, actor: Actor, kind: MomentKind, minut
     dayOff: (date) => !!bankHoliday(date, household.timeZone),
     startBetween,
     arrangedCare,
+    familyDayEnd: household.eveningEnds,
   });
 
   const feeds = await db.select().from(calendarFeeds).where(eq(calendarFeeds.householdId, household.id));
@@ -150,13 +151,16 @@ export async function freeTogetherIn(db: Db, actor: Actor, week: { weekKey: stri
   if (week.adults.length < 2 || from >= weekEnd) return out;
   const days = Math.ceil((weekEnd - from) / 86_400_000) + 1;
   const ctx = await planningContext(db, actor, "us", new Date(from), days);
+  // After the children's bedtime if the household has said one; a bedtime is
+  // never taken as care, so the children's state below is unchanged by it.
+  const start = ctx.household.bedtime && ctx.household.bedtime > "18:30" ? ctx.household.bedtime : "18:30";
   const evenings = freeEvenings({
     now: from,
     timeZone: tz,
     days,
     minutes: 150,
-    from: "18:30",
-    to: "20:00",
+    from: start,
+    to: start > "20:00" ? start : "20:00",
     participantIds: ctx.participants,
     carerIds: [],
     hasChildren: ctx.kids.length > 0,

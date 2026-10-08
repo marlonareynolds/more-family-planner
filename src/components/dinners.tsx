@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { DinnerChoice, DinnerRole } from "@/domain/meals";
 import type { DinnerView, MealView, MealsView, ShoppingLine } from "@/server/queries/meals";
 import { useApp } from "./app-context";
+import { dismiss, useDismissed } from "./dismissals";
 import { fmtDate } from "./format";
 import { Badge, Button, Card, Checkbox, ChoiceCard, Dialog, ErrorNote, Field, SectionTitle, inputClass } from "./ui";
 import { useCommand } from "./use-command";
@@ -16,7 +17,7 @@ import { useCommand } from "./use-command";
  * A dinner reserves nobody's evening; cooking and clearing up are jobs,
  * asked and agreed like any other.
  */
-export function DinnerPlanner({ data, days }: { data: MealsView; days: string[] }) {
+export function DinnerPlanner({ data, days, offers = {} }: { data: MealsView; days: string[]; offers?: Record<string, string> }) {
   const [choosing, setChoosing] = useState<string | null>(null);
   const [meals, setMeals] = useState(false);
   const byDate = new Map(data.dinners.map((d) => [d.date, d]));
@@ -45,6 +46,7 @@ export function DinnerPlanner({ data, days }: { data: MealsView; days: string[] 
                     </Button>
                   )}
                 </div>
+                {offers[date] && <EasyDinnerOffer date={date} reason={offers[date]} data={data} />}
                 {d && date >= data.today && <DinnerJobs dinner={d} />}
               </li>
             );
@@ -319,8 +321,40 @@ function ShoppingRow({ line: l }: { line: ShoppingLine }) {
   );
 }
 
+/**
+ * "Football and a late finish. Would an easy dinner help?" An offer, never
+ * a change: one tap uses the quick meal, and "No thanks" hides it for that
+ * evening on this phone.
+ */
+function EasyDinnerOffer({ date, reason, data }: { date: string; reason: string; data: MealsView }) {
+  const app = useApp();
+  const { run, pending, error } = useCommand(app.householdId);
+  const key = `more:easy-dinner:${app.householdId}:${date}`;
+  // Hidden on the server and until this phone's own answer is read.
+  const hidden = useDismissed(key);
+  const quick = data.meals.find((m) => m.quick);
+  const d = data.dinners.find((x) => x.date === date);
+  if (hidden || !quick) return null;
+  return (
+    <div className="mt-2 rounded-xl bg-brand-soft px-3 py-2 text-sm">
+      <p>{reason}{date === data.today ? " tonight" : ""}. Would an easy dinner help?</p>
+      <span className="mt-1.5 flex flex-wrap gap-2">
+        <Button size="sm" variant="primary" disabled={pending} onClick={() => run("SetDinner", { date, version: d?.version ?? null, choice: "fallback", mealId: quick.id })}>{quick.name}</Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => dismiss(key)}
+        >
+          No thanks
+        </Button>
+      </span>
+      <ErrorNote message={error?.message} />
+    </div>
+  );
+}
+
 /** Tonight's dinner on Today, with the fallback one tap away. */
-export function TonightDinner({ data }: { data: MealsView }) {
+export function TonightDinner({ data, offer }: { data: MealsView; offer?: string }) {
   const app = useApp();
   const { run, pending, error } = useCommand(app.householdId);
   const d = data.dinners.find((x) => x.date === data.today);
@@ -352,6 +386,7 @@ export function TonightDinner({ data }: { data: MealsView }) {
           <Link href="/week#dinners" className="inline-flex min-h-9 items-center rounded-full px-3 text-sm text-brand underline">{undecided ? "Choose" : "Change"}</Link>
         </span>
       </div>
+      {offer && <EasyDinnerOffer date={data.today} reason={offer} data={data} />}
       {toBuy > 0 && (
         <Link href="/week#shopping" className="mt-2 inline-flex items-center gap-2 text-sm text-ink-2 underline">
           <ShoppingBasket aria-hidden size={16} />

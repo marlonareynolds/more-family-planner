@@ -47,3 +47,38 @@ export function dinnerJobTitle(role: DinnerRole, choice: DinnerChoice, mealName:
   const what = choice === "leftovers" ? "heat up the leftovers" : `cook ${(mealName ?? "dinner").slice(0, 60)}`;
   return role === "cook" ? `Dinner: ${what}` : "Dinner: clear up afterwards";
 }
+
+export interface EveningItem {
+  /** Local clock times on the day, "HH:MM". */
+  startTime: string;
+  endTime: string;
+  allDay: boolean;
+  adults: number;
+  children: number;
+  /** A title the viewer may see, or null when it's someone's busy time. */
+  title: string | null;
+}
+
+/**
+ * Why an evening might be a hard one for cooking, in plain words, from
+ * what's in the diary: a late finish, someone out at teatime, a club.
+ * Explainable rules only; no score, and nothing about how anyone feels.
+ */
+export function hardEveningReasons(items: readonly EveningItem[]): string[] {
+  const out: string[] = [];
+  for (const i of items) {
+    if (i.allDay) continue;
+    const teatime = i.startTime < "19:00" && i.endTime > "17:30";
+    if (!teatime) continue;
+    if (i.children > 0) out.push(i.title ?? "a club");
+    else if (i.adults > 0) out.push(i.startTime < "17:00" ? "a late finish" : "someone out at teatime");
+  }
+  return [...new Set(out)];
+}
+
+/** "Football and a late finish" */
+export function joinReasons(reasons: readonly string[]): string {
+  const r = reasons.slice(0, 3);
+  const text = r.length > 1 ? `${r.slice(0, -1).join(", ")} and ${r.at(-1)}` : (r[0] ?? "");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
