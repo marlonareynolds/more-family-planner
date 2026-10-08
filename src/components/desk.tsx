@@ -111,11 +111,12 @@ function keyFields(d: Draft): KeyFields {
 /** The entry the card would change, if there is exactly one it can. */
 function updatable(d: Draft): DeskTarget | null {
   const t = d.dup?.status === "changed" ? d.dup.current : d.dup?.status === "possible" && d.dup.candidates.length === 1 ? d.dup.candidates[0] : null;
-  return t && !t.recurring && !t.linkedJobs && !t.mixedNotes && (t.targetType === "event" || t.targetType === "trip") ? t : null;
+  return t && !t.recurring && !t.linkedJobs && !t.mixedNotes && !(d.pickupChange && !t.shared) && (t.targetType === "event" || t.targetType === "trip") ? t : null;
 }
 
 /** Why the Desk won't change an entry itself, and where to do it instead. */
-function byHand(t: DeskTarget): string {
+function byHand(t: DeskTarget, pickup: boolean): string {
+  if (pickup && !t.shared) return " It's private in the diary, and a collection is shared, so add the pickup in Jobs yourself or share the entry first.";
   if (t.recurring) return " It repeats, so change it in the diary if you need to.";
   if (t.linkedJobs) return " A job hangs off it, such as a collection or payment, so change the entry in the diary and the job in Jobs. Whoever agreed to the job then sees the new time.";
   if (t.mixedNotes) return " Its notes mix an earlier letter with your own, so change it in the diary.";
@@ -473,12 +474,12 @@ function dupLine(d: Draft): string {
   if (!dup) return "";
   if (dup.status === "added") return `Already in the diary: added by ${dup.by} on ${fmtDate(dup.on)}. It won't be added twice.`;
   if (dup.status === "changed") {
-    const tail = byHand(dup.current);
+    const tail = byHand(dup.current, d.pickupChange);
     return `Added by ${dup.by} on ${fmtDate(dup.on)}, but the letter and the diary differ now. The diary has ${targetWhen(dup.current)}.${tail}`;
   }
   if (dup.status === "possible") {
     const list = dup.candidates.map(targetWhen).join("; ");
-    const many = dup.candidates.length > 1 ? " To change one of those, do it in the diary." : byHand(dup.candidates[0]);
+    const many = dup.candidates.length > 1 ? " To change one of those, do it in the diary." : byHand(dup.candidates[0], d.pickupChange);
     return dup.sameDay
       ? `“${d.title}” is already in the diary that day (${list}). Is this another session, or has the time changed?${many}`
       : `“${d.title}” is already in the diary on ${list}. Is this a new date for it, or another one?${many}`;

@@ -1,11 +1,11 @@
 # More quality release: evidence
 
-For Marlon's three reviews of this branch (`claude/project-thread-32i1xh`, PR #11): 2026-10-07 23:38 UTC (five priorities, sections 1 to 5), 2026-10-08 08:45 UTC (Q01 to Q07) and 2026-10-08 10:29 UTC (R1 to R4, last section).
+For Marlon's reviews of this branch (`claude/project-thread-32i1xh`, PR #11): 2026-10-07 23:38 UTC (five priorities, sections 1 to 5), 2026-10-08 08:45 UTC (Q01 to Q07) and 2026-10-08 10:29 UTC (R1 to R4) and the R1 to R4 closeout at 11:13 UTC (last two sections).
 Each item is answered as **fixed and demonstrated**, **implemented, not exercised**, **deferred by decision** or **unresolved**.
 
 ### Current state (read this first)
 
-- **Revision for review:** the head of PR #11 after the R1 to R4 commit (it follows 7f1ce52). Totals: 345 tests passed, 7 skipped (real-Postgres tests run in CI); typecheck and lint clean (4 old warnings); all 12 browser journeys (6 journeys, phone and desktop) passed locally. CI result is recorded in PR #11.
+- **Revision for review:** the head of PR #11 after the R1 closeout commit (it follows 8974b3c). Totals: 348 tests passed, 7 skipped (real-Postgres tests run in CI); typecheck and lint clean (4 old warnings); all 12 browser journeys (6 journeys, phone and desktop) passed locally. CI on this commit is recorded in PR #11; the previous commit, 8974b3c, passed CI run 37766446004.
 - **Schema:** one database change in this release, 0013 (the `desk_items` table and three job columns), already applied to the live database on 8 Oct at about 08:15 UTC. The Q and R corrections add no schema change.
 - **Earlier sections are history.** Sections 1 to 5 describe the first pass (3e2791a); the "Corrections" sections say what changed after. Where a later correction replaced a claim, the earlier row says so.
 - **Acknowledged limitations, still open:** a date with no time goes in as all day and so shows as busy all day; a trip has nowhere to keep "what to bring"; a deadline-only letter can't be linked to an older entry; the AI allowance is one cap for all households, not per household; extraction accuracy has not been measured on unseen letters, repeated runs or imperfect photos; real-phone and assistive-technology checks have not been done; the AI cap is a conservative reservation, not an exact guarantee.
@@ -129,3 +129,12 @@ Reviewed revision: 7f1ce52. "Failing before" means the new test was run with 7f1
 | R4 Time spent waiting to reserve wasn't taken off the read | Fixed and demonstrated | The time left is worked out again after the reservation lands, before anything is sent. If under 20s remain, the reservation is released (nothing was sent, so nothing billed) and the letter is read the simpler way. Waiting for another read's reservation is limited to 10s. Settlement still fits in the route's time. Tests: 45s spent reserving gives the read 40s, not 85s; a reservation landing at 80s sends nothing and the reservation reads "released". Both failing before. The existing uncertain-timeout test still passes. Not exercised: a real lock wait between two database sessions. |
 | Browser journey | Demonstrated, phone and desktop | `tests/e2e/journeys.spec.ts` "a pickup from a letter": Alex pastes "school finishes at 2pm", corrects "Collect at" to 13:45, chooses "Ask Sam to collect" (no "Keep this just for me" on the card), adds it; Sam sees "Collect the children at 13:45" with "asked if you could take this on", taps "Yes, it's mine" and it reads "Yours"; Alex reads the letter again and the card explains why the Desk won't move it, with no "Update the entry". |
 | Source comments promising an absolute cap | Corrected | `src/server/desk-ai.ts` now says the cap is a close, conservative bound resting on an estimated token count, not an exact one. |
+
+
+## R1 closeout after Marlon's review of 8974b3c (11:13 UTC)
+
+R2, R3 and R4 were closed for this restricted release; R1 had one remaining path. No schema change.
+
+| Finding | Answer | Evidence |
+|---|---|---|
+| R1 remaining path: a Desk update adds a pickup to an entry that was imported shared and later made private in the diary; the card's "just for me" was off, so the collection job copied the private title | Fixed by a server-enforced restriction | The collection job now takes privacy from the entry as stored, in the same household, not from the card: a private entry gets no collection ("is private in the diary, and a collection is shared with the household. Add the pickup in Jobs yourself, or share the entry first.") and the whole import is refused. The Desk card says the same and doesn't offer the update. Children's names for the job title are also looked up only within the household. Test (`quality-corrections.test.ts`, "R1 (closeout)", once each for "I'll collect", "Ask Sam", "Not decided yet"): shared import, Alex makes it private, a fresh preview of the changed notice with a pickup, update with "just for me" off. Refused; no job; the entry's version, privacy and notes unchanged; nothing queued; Sam's notifications, full Jobs response and export carry no private title. All three failing before on 8974b3c (the update succeeded). The positive case, a pickup added to a genuinely shared entry, still passes. |

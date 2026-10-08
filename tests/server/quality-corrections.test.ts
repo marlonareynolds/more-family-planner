@@ -314,6 +314,39 @@ describe("R1: a private pickup never reaches the other adult", () => {
   });
 });
 
+describe("R1 (closeout): a pickup added to an entry made private later", () => {
+  it.each(["me", "partner", "none"] as const)("collect %s: refused, nothing changes, and Sam sees no private title", async (collect) => {
+    const w = await newWorld();
+    const mia = (await w.run(w.alex, "AddChild", { preferredName: "Mia", ageBand: "5-7" })).childId;
+    const outing = (over: Record<string, unknown> = {}) =>
+      card({ title: "SECRET surprise outing", allDay: true, startTime: null, endTime: null, location: "", details: "", childIds: [mia], ...over });
+    // Added shared through the Desk, with no collection; then Alex makes it private in the diary.
+    await imp(w, w.alex, [outing()]);
+    const [e] = await liveEvents(w);
+    await w.run(w.alex, "UpdateEvent", { eventId: e.id, version: e.version, fields: fieldsOf(e, { visibility: "private", adultIds: [w.alex.accountId], span: { allDay: true, startDate: "2026-11-12", endDate: "2026-11-12" } }) });
+    const [privateNow] = await liveEvents(w);
+    expect(privateNow.visibility).toBe("private");
+
+    // A changed notice adds a pickup; Alex has a fresh preview, so only privacy can stop it.
+    const changed = outing({ collect, collectAt: "12:30" });
+    const s = (await statusOf(w, w.alex, changed)) as Extract<DeskStatus, { status: "changed" }>;
+    expect(s).toMatchObject({ status: "changed", current: { shared: false, version: privateNow.version } });
+    const outboxBefore = (await w.db.select().from(outbox)).length;
+    await expectCode(imp(w, w.alex, [{ ...changed, justMe: false, action: "update", targetId: s.current.targetId, targetVersion: s.current.version }]), "VALIDATION");
+
+    // The whole import rolled back: no job, the entry as it was, nothing queued for Sam.
+    expect(await w.db.select().from(jobs)).toEqual([]);
+    const [after] = await liveEvents(w);
+    expect(after).toMatchObject({ version: privateNow.version, visibility: "private", notes: privateNow.notes });
+    expect((await w.db.select().from(outbox)).length).toBe(outboxBefore);
+    await processOutbox(w.db, new Date(Date.now() + 60_000));
+    expect(JSON.stringify(await w.db.select().from(notifications).where(eq(notifications.accountId, w.sam.accountId)))).not.toMatch(/SECRET|surprise/i);
+    expect(JSON.stringify(await jobsFor(w.db, w.sam, NOW))).not.toMatch(/SECRET|surprise/i);
+    const { exportHousehold } = await import("@/server/queries/exports");
+    expect(JSON.stringify(await exportHousehold(w.db, w.sam))).not.toMatch(/SECRET|surprise/i);
+  });
+});
+
 describe("R2: a pickup's collection is never left at the old time", () => {
   const pickup = (mia: string, over: Record<string, unknown> = {}) =>
     card({ title: "School closes early", allDay: true, startTime: null, endTime: null, location: "", details: "", childIds: [mia], collect: "partner", collectAt: "13:30", ...over });

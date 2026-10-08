@@ -155,14 +155,19 @@ async function create(ctx: CommandContext, i: ImportItem, linked: Map<string, Ta
 
 /** The collection a changed pickup needs: a job, so asking the other adult is a request they answer. */
 async function collection(ctx: CommandContext, i: ImportItem, event: Target) {
-  const names = i.childIds.length ? (await ctx.tx.select({ name: children.preferredName }).from(children).where(inArray(children.id, i.childIds))).map((c) => c.name) : [];
+  // Privacy comes from the entry as it is stored, not the card: an entry made private
+  // in the diary after an earlier read stays private, and a job is seen by both adults.
+  const [row] = await ctx.tx.select({ visibility: events.visibility }).from(events).where(and(eq(events.id, event.id), eq(events.householdId, ctx.household.id)));
+  if (!row || row.visibility !== "shared") {
+    throw new DomainError("VALIDATION", `“${i.title}” is private in the diary, and a collection is shared with the household. Add the pickup in Jobs yourself, or share the entry first.`);
+  }
+  const names = i.childIds.length ? (await ctx.tx.select({ name: children.preferredName }).from(children).where(and(eq(children.householdId, ctx.household.id), inArray(children.id, i.childIds)))).map((c) => c.name) : [];
   const at = i.collectAt ?? i.startTime;
   await addJob.handler(
     ctx,
     addJob.payload.parse({
       title: `Collect ${names.length ? names.join(" and ") : "the children"}${at ? ` at ${at}` : ""}`.slice(0, 80),
-      // A job is seen by the whole household: it names the entry only when the entry is shared.
-      notes: i.justMe ? "" : i.title,
+      notes: i.title,
       cadence: "once",
       startsOn: i.startDate,
       dueTime: at,

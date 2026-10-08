@@ -83,6 +83,8 @@ export interface DeskTarget {
    * tell which to replace, so the person sorts them out in the diary.
    */
   mixedNotes: boolean;
+  /** Seen by both adults. A private entry can't take a pickup from the Desk: its collection job would be shared. */
+  shared: boolean;
 }
 
 export type DeskStatus =
@@ -123,6 +125,7 @@ export async function deskTarget(db: DbOrTx, householdId: string, viewerId: stri
       recurring: e.rule !== null,
       linkedJobs: await jobsFor(db, householdId, "event", e.id),
       mixedNotes: e.notes.trim() !== "" && !e.notes.split("\n").includes(LETTER_HEADING),
+      shared: e.visibility === "shared",
     };
   }
   if (type === "trip") {
@@ -130,16 +133,16 @@ export async function deskTarget(db: DbOrTx, householdId: string, viewerId: stri
     if (!t) return null;
     const s = instantToLocal(t.startAt.getTime(), timeZone);
     const e = instantToLocal(t.endAt.getTime(), timeZone);
-    return { targetType: "trip", targetId: t.id, version: t.version, startDate: s.toPlainDate().toString(), startTime: clock(s), endDate: e.toPlainDate().toString(), endTime: clock(e), recurring: false, linkedJobs: await jobsFor(db, householdId, "trip", t.id), mixedNotes: false };
+    return { targetType: "trip", targetId: t.id, version: t.version, startDate: s.toPlainDate().toString(), startTime: clock(s), endDate: e.toPlainDate().toString(), endTime: clock(e), recurring: false, linkedJobs: await jobsFor(db, householdId, "trip", t.id), mixedNotes: false, shared: true };
   }
   if (type === "holiday") {
     const [h] = await db.select().from(holidayPeriods).where(and(eq(holidayPeriods.id, id), eq(holidayPeriods.householdId, householdId), isNull(holidayPeriods.archivedAt)));
     if (!h) return null;
-    return { targetType: "holiday", targetId: h.id, version: h.version, startDate: h.startDate, startTime: null, endDate: addDays(h.endDateExclusive, -1), endTime: null, recurring: false, linkedJobs: 0, mixedNotes: false };
+    return { targetType: "holiday", targetId: h.id, version: h.version, startDate: h.startDate, startTime: null, endDate: addDays(h.endDateExclusive, -1), endTime: null, recurring: false, linkedJobs: 0, mixedNotes: false, shared: true };
   }
   const [j] = await db.select().from(jobs).where(and(eq(jobs.id, id), eq(jobs.householdId, householdId), isNull(jobs.archivedAt)));
   if (!j) return null;
-  return { targetType: "job", targetId: j.id, version: j.version, startDate: j.startsOn, startTime: j.dueTime, endDate: j.startsOn, endTime: null, recurring: j.cadence !== "once", linkedJobs: 0, mixedNotes: false };
+  return { targetType: "job", targetId: j.id, version: j.version, startDate: j.startsOn, startTime: j.dueTime, endDate: j.startsOn, endTime: null, recurring: j.cadence !== "once", linkedJobs: 0, mixedNotes: false, shared: true };
 }
 
 async function jobsFor(db: DbOrTx, householdId: string, type: "event" | "trip", id: string) {
