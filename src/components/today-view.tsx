@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Bell, CalendarPlus, Check, Heart, ListChecks, MapPin, MessageCircleHeart, RefreshCw, Sparkles, UserPlus, Users } from "lucide-react";
+import { ArrowRight, Bell, CalendarPlus, Check, Heart, Inbox, ListChecks, MapPin, MessageCircleHeart, RefreshCw, Sparkles, UserPlus, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -62,7 +62,7 @@ function whenLabel(m: { start: number }, today: string, tz: string): string {
   return `${fmtDate(date)} at ${time}`;
 }
 
-export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
+export function TodayView({ data, jobs, deskUsed = true }: { data: WeekView; jobs?: JobsView; deskUsed?: boolean }) {
   const app = useApp();
   const router = useRouter();
   const now = useNow();
@@ -95,6 +95,7 @@ export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
 
   const steps = [
     { done: app.children.length > 0, label: "Add the children", href: "/settings#children", icon: Users },
+    { done: deskUsed, label: "Add a letter from school or a club", href: "/desk", icon: Inbox },
     { done: app.adults.length > 1, label: "Bring your partner in", href: "/settings", icon: UserPlus },
     { done: data.calendars.length > 0 || data.events.some((e) => e.mine), label: "Add your work week or calendar", href: "/welcome", icon: CalendarPlus },
     { done: data.planning.planned || data.moments.some((m) => m.sharing === "shared"), label: "Plan your first week", href: "/plan", icon: Sparkles },
@@ -105,6 +106,8 @@ export function TodayView({ data, jobs }: { data: WeekView; jobs?: JobsView }) {
 
   const has = (action: string) => data.attention.some((a) => a.action === action);
   const others = [
+    // The household desk is how most dates get in: always one tap from Today.
+    { label: "Got a letter or booking?", hint: "Paste it or add a photo; More picks out the dates", icon: Inbox, tone: "bg-brand-soft text-brand", href: "/desk" },
     ...(!data.checkinDone ? [{ label: "Quick private check-in", hint: "Two questions, just for you", icon: MessageCircleHeart, tone: "bg-me-soft text-me", onClick: () => setCheckin(true) }] : []),
     ...(has("date-ahead") ? [{ label: "A date coming up", hint: "Only you get this reminder", icon: Heart, tone: "bg-us-soft text-us", href: "/us" }] : []),
     ...(has("calendar") ? [{ label: "Check calendars", hint: "A calendar needs a look", icon: RefreshCw, tone: "bg-surface-2 text-ink-2", href: "/settings#calendars" }] : []),
