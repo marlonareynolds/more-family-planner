@@ -3,7 +3,7 @@ import { getDb } from "@/db/client";
 import { DomainError } from "@/domain/errors";
 import { requireActor } from "@/server/auth";
 import { checkDesk, deskCheckInput } from "@/server/desk";
-import { assertSameOrigin, errorResponse, noStore } from "@/server/http";
+import { assertSameOrigin, errorResponse, noStore, readJson } from "@/server/http";
 import { assertRate } from "@/server/rate-limit";
 
 const body = z.object({ householdId: z.uuid(), items: z.array(deskCheckInput).max(60) });
@@ -13,8 +13,8 @@ export async function POST(req: Request) {
   try {
     assertSameOrigin(req, 200_000);
     const actor = await requireActor();
-    assertRate(`desk-check:${actor.accountId}`, 120, 3_600_000);
-    const parsed = body.safeParse(await req.json().catch(() => null));
+    await assertRate(`desk-check:${actor.accountId}`, 120, 3_600_000);
+    const parsed = body.safeParse(await readJson(req));
     if (!parsed.success) throw new DomainError("VALIDATION", "Those cards couldn't be checked.");
     return Response.json({ statuses: await checkDesk(await getDb(), actor, parsed.data.householdId, parsed.data.items) }, { headers: noStore });
   } catch (err) {

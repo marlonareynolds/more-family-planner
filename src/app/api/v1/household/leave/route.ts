@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getDb } from "@/db/client";
 import { DomainError } from "@/domain/errors";
 import { requireActor } from "@/server/auth";
-import { assertSameOrigin, errorResponse, noStore } from "@/server/http";
+import { assertSameOrigin, errorResponse, noStore, readJson } from "@/server/http";
 import { leaveHousehold } from "@/server/leaving";
 import { assertRate } from "@/server/rate-limit";
 import { afterChange } from "@/server/tick";
@@ -26,8 +26,8 @@ export async function POST(req: Request) {
   try {
     assertSameOrigin(req);
     const actor = await requireActor();
-    assertRate(`cmd:${actor.accountId}`, 120, 60_000);
-    const parsed = body.safeParse(await req.json().catch(() => null));
+    await assertRate(`cmd:${actor.accountId}`, 120, 60_000);
+    const parsed = body.safeParse(await readJson(req));
     if (!parsed.success) throw new DomainError("VALIDATION", "Refresh and try again.");
     const db = await getDb();
     const result = await leaveHousehold(db, actor, parsed.data.householdId, parsed.data.how);

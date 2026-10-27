@@ -4,6 +4,7 @@
  * private title, a partner's raw answer or internal detail.
  */
 export type ErrorCode =
+  | "BAD_REQUEST"
   | "VALIDATION"
   | "UNAUTHENTICATED"
   | "NOT_FOUND"
@@ -21,6 +22,8 @@ export type ErrorCode =
   | "INTERNAL";
 
 const STATUS: Record<ErrorCode, number> = {
+  /** The body could not be read at all: not JSON, or carrying characters nothing can store. */
+  BAD_REQUEST: 400,
   VALIDATION: 422,
   UNAUTHENTICATED: 401,
   // Inaccessible and missing resources answer the same way (non-enumerating).

@@ -120,6 +120,13 @@
       "when": 1791490932448,
       "tag": "0016_evening_and_spending_guide",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793099541126,
+      "tag": "0017_shared_rate_limits",
+      "breakpoints": true
     }
   ]
 }

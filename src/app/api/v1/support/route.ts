@@ -1,7 +1,7 @@
 import { getDb } from "@/db/client";
 import { DomainError } from "@/domain/errors";
 import { currentActor } from "@/server/auth";
-import { assertSameOrigin, errorResponse, noStore } from "@/server/http";
+import { assertSameOrigin, errorResponse, noStore, readJson } from "@/server/http";
 import { assertRate, clientAddress } from "@/server/rate-limit";
 import { submitSupport, supportInput } from "@/server/support";
 
@@ -9,8 +9,8 @@ import { submitSupport, supportInput } from "@/server/support";
 export async function POST(req: Request) {
   try {
     assertSameOrigin(req);
-    assertRate(`support:${clientAddress(req)}`, 5, 3_600_000);
-    const parsed = supportInput.safeParse(await req.json());
+    await assertRate(`support:${clientAddress(req)}`, 5, 3_600_000);
+    const parsed = supportInput.safeParse(await readJson(req));
     if (!parsed.success) throw new DomainError("VALIDATION", "Write a few words so we know what it's about.");
     const actor = await currentActor().catch(() => null);
     const { id } = await submitSupport(await getDb(), actor?.accountId ?? null, parsed.data);

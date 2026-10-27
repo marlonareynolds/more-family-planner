@@ -2,7 +2,7 @@ import { getDb } from "@/db/client";
 import { DomainError } from "@/domain/errors";
 import { requireActor } from "@/server/auth";
 import { deskAiEnabled, deskInput, readWithAi } from "@/server/desk-ai";
-import { assertSameOrigin, errorResponse, noStore } from "@/server/http";
+import { assertSameOrigin, errorResponse, noStore, readJson } from "@/server/http";
 import { assertRate } from "@/server/rate-limit";
 
 export const maxDuration = 120;
@@ -12,8 +12,8 @@ export async function POST(req: Request) {
   try {
     assertSameOrigin(req, 4_500_000);
     const actor = await requireActor();
-    assertRate(`desk-ai:${actor.accountId}`, 30, 3_600_000);
-    const parsed = deskInput.safeParse(await req.json().catch(() => null));
+    await assertRate(`desk-ai:${actor.accountId}`, 30, 3_600_000);
+    const parsed = deskInput.safeParse(await readJson(req));
     if (!parsed.success) throw new DomainError("VALIDATION", "That file is too large or not a photo or PDF.");
     const { items, unreadable } = await readWithAi(await getDb(), actor, parsed.data);
     return Response.json({ items, unreadable }, { headers: noStore });
