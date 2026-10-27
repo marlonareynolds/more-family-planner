@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { currentActor } from "@/server/auth";
+import { LegalFooter } from "@/components/legal-footer";
 import { JoinButton } from "./join-button";
 
 export const metadata = { title: "Join a household" };
@@ -15,6 +16,7 @@ export default async function Join(props: PageProps<"/join/[token]">) {
         You will share the diary, plans, childcare and costs. Your journal, check-ins and reflections stay private to you, and you can leave and take them with you at any time.
       </p>
       <JoinButton token={token} />
+      <LegalFooter />
     </main>
   );
 }

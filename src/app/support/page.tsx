@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LegalFooter } from "@/components/legal-footer";
 import { SupportForm } from "./support-form";
 
 export const metadata = { title: "Help" };
@@ -15,6 +16,7 @@ export default function SupportPage() {
       </p>
       <SupportForm />
       <p className="text-xs text-ink-3">Only the people who run More see this. Don&apos;t include passwords.</p>
+      <LegalFooter />
     </main>
   );
 }
