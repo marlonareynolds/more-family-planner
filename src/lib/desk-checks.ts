@@ -1,4 +1,4 @@
-import type { Proposal } from "./desk-read";
+import { weekdayClash, type Proposal } from "./desk-read";
 
 /**
  * What a parent must see before a Desk card enters the diary (quality
@@ -36,11 +36,17 @@ export function plusMinutes(time: string, minutes: number): string {
 }
 
 export function checksFor(
-  p: Pick<Proposal, "kind" | "role" | "startTime" | "endTime" | "endStated" | "dateCertain" | "pickupChange" | "forWhom" | "childIds" | "source" | "title" | "details"> & { collectAt?: string | null },
-  ctx: { children: { id: string }[]; letter: string | null },
+  p: Pick<Proposal, "kind" | "role" | "startTime" | "endTime" | "endStated" | "dateCertain" | "pickupChange" | "forWhom" | "childIds" | "source" | "title" | "details"> & { collectAt?: string | null; startDate?: string },
+  ctx: { children: { id: string }[]; letter: string | null; today?: string },
 ): DeskCheck[] {
   const out: DeskCheck[] = [];
-  if (!p.dateCertain) out.push({ code: "date_unclear", text: "The date was worked out from the letter. Check it before adding.", decide: true });
+  // Whichever reader made the card: a weekday that doesn't fit the date, or a
+  // date almost a year off that the letter gave no year for, is flagged, not guessed.
+  const clash = !!p.startDate && weekdayClash(p.source, p.startDate);
+  const farOff = !!p.startDate && !!ctx.today && !/\b20\d{2}\b/.test(p.source) && Date.parse(`${p.startDate}T12:00:00Z`) - Date.parse(`${ctx.today}T12:00:00Z`) > 300 * 86_400_000;
+  if (clash) out.push({ code: "date_unclear", text: "The day of the week in the letter doesn't match this date. Check which is right before adding.", decide: true });
+  else if (farOff) out.push({ code: "date_unclear", text: "This date is almost a year away. If the letter meant one that has already passed, leave it out.", decide: true });
+  else if (!p.dateCertain) out.push({ code: "date_unclear", text: "The date was worked out from the letter. Check it before adding.", decide: true });
   if (p.pickupChange) out.push({ code: "pickup", text: `This changes a pickup${p.collectAt ? `: collection at ${p.collectAt}` : ""}. Choose who collects, or leave it out.`, decide: true });
   if (p.role === "deadline" && PAYMENT.test(`${p.title} ${p.details} ${p.source}`)) out.push({ code: "payment", text: "A payment. Choose who will pay it.", decide: true });
   // A school break naming no child may be one school's: with more than one child, ask rather than cover them all.

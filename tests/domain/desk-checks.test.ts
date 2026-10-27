@@ -23,7 +23,7 @@ const one = (text: string) => {
 
 describe("Desk card checks", () => {
   it("a date with no time says so, and doesn't pretend to an hour", () => {
-    const p = one("Harvest festival on Friday 17 October.");
+    const p = one("Harvest festival on Friday 16 October.");
     expect(p.startTime).toBeNull();
     expect(codes(p)).toContain("time_not_stated");
     expect(noteLines(checksFor(p, { children: kids, letter: null }))).toEqual(["Time not stated in the letter."]);
@@ -59,7 +59,7 @@ describe("Desk card checks", () => {
   });
 
   it("a worked-out date must be checked", () => {
-    const p = one("Harvest festival on Friday 17 October.");
+    const p = one("Harvest festival on Friday 16 October.");
     expect(codes({ ...p, dateCertain: false })).toContain("date_unclear!");
   });
 

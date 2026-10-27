@@ -22,6 +22,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import type { Features } from "@/lib/flags";
 import { cx } from "./ui";
 
 interface Place {
@@ -29,6 +30,8 @@ interface Place {
   label: string;
   icon: LucideIcon;
   hint?: string;
+  /** Shown only while this feature is switched on. */
+  feature?: "places" | "look-back" | "trial";
 }
 
 const primary: Place[] = [
@@ -38,19 +41,20 @@ const primary: Place[] = [
   { href: "/family", label: "Family", icon: Users },
   { href: "/me", label: "Me", icon: Leaf },
 ];
-const secondary: Place[] = [
+const allSecondary: Place[] = [
   { href: "/desk", label: "Household desk", icon: Inbox, hint: "Paste a letter or booking, add the dates" },
   { href: "/plan", label: "Plan the week", icon: Sparkles, hint: "Ten minutes, once a week" },
   { href: "/jobs", label: "Jobs", icon: ListChecks, hint: "Who does what at home" },
-  { href: "/places", label: "Our places", icon: MapPin, hint: "Spots you love nearby" },
+  { href: "/places", label: "Our places", icon: MapPin, hint: "Spots you love nearby", feature: "places" },
   { href: "/holidays", label: "Trips and care", icon: Backpack, hint: "Time away, school breaks, who has the children" },
-  { href: "/look-back", label: "Look back", icon: BookHeart, hint: "Your month in memories" },
-  { href: "/trial", label: "Trial", icon: FlaskConical, hint: "Weekly questions" },
+  { href: "/look-back", label: "Look back", icon: BookHeart, hint: "Your month in memories", feature: "look-back" },
+  { href: "/trial", label: "Trial", icon: FlaskConical, hint: "Weekly questions", feature: "trial" },
   { href: "/settings", label: "Settings", icon: Settings, hint: "People, calendars, notifications" },
 ];
 
-export function NavBar({ householdName, myName }: { householdName: string; myName: string }) {
+export function NavBar({ householdName, myName, show }: { householdName: string; myName: string; show: Features }) {
   const path = usePathname();
+  const secondary = allSecondary.filter((s) => !s.feature || show[s.feature]);
   const active = (href: string) => path === href || path.startsWith(`${href}/`);
   const [open, setOpen] = useState(false);
   const inSecondary = secondary.some((s) => active(s.href));

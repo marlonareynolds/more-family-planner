@@ -37,7 +37,7 @@ export function MomentCard({ moment: m, expense, compact = false }: { moment: Mo
   // A good outing can become one of the household's places in one tap.
   const placeName = (m.location || m.title).split(",")[0].trim();
   const canSavePlace =
-    m.lifecycle === "completed" && !m.detailsHidden && !m.activityKey?.startsWith("place:") && !!placeName &&
+    app.features.places && m.lifecycle === "completed" && !m.detailsHidden && !m.activityKey?.startsWith("place:") && !!placeName &&
     !app.places.some((p) => p.name.toLowerCase() === placeName.toLowerCase());
 
   const now = useNow();

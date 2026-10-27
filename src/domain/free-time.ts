@@ -30,6 +30,8 @@ export interface FreeTimeInput {
   familyDayEnd?: string;
   /** Only start between these local times ("HH:MM"), for ideas tied to a time of day. */
   startBetween?: readonly [string, string];
+  /** Only on working days (Monday to Friday, not a bank holiday): a break from the working day. */
+  workdaysOnly?: boolean;
   /** Days most people are off work (bank holidays): treated like a weekend for long outings. */
   dayOff?: (date: string) => boolean;
   /** Care the household has already arranged for the children over a time, if any. */
@@ -109,6 +111,7 @@ export function suggestTimes(input: FreeTimeInput): SuggestedTime[] {
     const offDay = hours(localToInstantCompatible(`${date}T12:00`, tz), tz).weekend || !!input.dayOff?.(date);
     // A seaside day belongs on a weekend or holiday, starting in the morning.
     if (long && !offDay) continue;
+    if (input.workdaysOnly && offDay) continue;
     const familyEnd = input.familyDayEnd ?? FAMILY_DAY_END;
     const dayEnd = kind === "family" && (input.dayEnd ?? "22:30") > familyEnd ? familyEnd : (input.dayEnd ?? "22:30");
     const dayWindow = {

@@ -1,14 +1,16 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useApp } from "./app-context";
 import { addDaysStr, mondayOf, todayIn } from "./format";
 import { Button, Card, ErrorNote, Field, inputClass } from "./ui";
 import { useCommand } from "./use-command";
 import { DeskBoard } from "./desk";
+import { InviteShare } from "./invite-share";
 
-type Step = "children" | "letters" | "holidays" | "work" | "calendar" | "invite" | "done";
+type Step = WelcomeStep | "done";
 const AGE_BANDS = ["0-4", "5-7", "8-11", "12-15", "16+"] as const;
 const DAYS = [
   { code: "MO", label: "Mon" },
@@ -22,52 +24,80 @@ const DAYS = [
 const HOLIDAYS = ["Autumn half term", "Christmas holidays", "Spring half term", "Easter holidays", "Summer half term", "Summer holidays"];
 
 /**
- * A short path that fills the week: children, school holidays, each adult's
- * usual working pattern, a calendar link and the partner invite. Every step
- * can be skipped and done later in Settings.
+ * Three steps at most, then Today (review: "7 screens, then an empty Today").
+ * Whoever sets up the household adds the children, a first letter and the
+ * invitation; a partner who joins skips everything already done and only
+ * adds their own week. School holidays, a working week and a calendar link
+ * are optional cards on Today, which open one step here (`only`).
  */
-export function Welcome({ has, ai = false }: { has: { children: boolean; holidays: boolean; work: boolean; calendar: boolean; partner: boolean; letters: boolean }; ai?: boolean }) {
+export type WelcomeStep = "children" | "letters" | "holidays" | "work" | "calendar" | "invite";
+
+export function Welcome({ has, ai = false, only }: { has: { children: boolean; holidays: boolean; work: boolean; calendar: boolean; partner: boolean; letters: boolean; joined: boolean }; ai?: boolean; only?: WelcomeStep }) {
   const app = useApp();
+  // A partner who joined: the inviter has set the household up already.
+  const joined = has.joined;
+  const inviter = app.adults.find((a) => a.id !== app.me.id)?.displayName ?? "Your partner";
   // Fixed when the page opens: adding things on the way must not move the steps under the person.
-  const [steps] = useState<Step[]>(() => [
-    ...(!has.children && !has.partner ? (["children"] as const) : []),
-    // Letters next: term dates and school letters fill the diary fastest, and can cover the holidays too.
-    ...(!has.letters ? (["letters"] as const) : []),
-    // Holidays only make sense once there are children.
-    ...(!has.holidays && app.children.length > 0 ? (["holidays"] as const) : []),
-    ...(!has.work ? (["work"] as const) : []),
-    ...(!has.calendar ? (["calendar"] as const) : []),
-    ...(!has.partner ? (["invite"] as const) : []),
-    "done" as const,
-  ]);
+  const [steps] = useState<Step[]>(() =>
+    only
+      ? [only, "done"]
+      : joined
+        ? [...(!has.work ? (["work"] as const) : []), "done"]
+        : [
+            ...(!has.children ? (["children"] as const) : []),
+            // Letters next: term dates and school letters fill the diary fastest, and can cover the holidays too.
+            ...(!has.letters ? (["letters"] as const) : []),
+            ...(!has.partner ? (["invite"] as const) : []),
+            "done" as const,
+          ],
+  );
   const [i, setI] = useState(0);
-  /** A school break came in from a letter, so the holidays form isn't needed. */
-  const [breaksAdded, setBreaksAdded] = useState(false);
   const step = steps[i];
-  const next = () =>
-    setI((n) => {
-      let to = Math.min(n + 1, steps.length - 1);
-      if (steps[to] === "holidays" && breaksAdded) to = Math.min(to + 1, steps.length - 1);
-      return to;
-    });
+  const next = () => setI((n) => Math.min(n + 1, steps.length - 1));
   const current: Step = step;
+  const counted = steps.length - 1;
 
   return (
     <div className="mx-auto max-w-xl">
-      <p className="text-sm text-ink-3">Getting started · step {Math.min(i + 1, steps.length)} of {steps.length}</p>
+      {current !== "done" && !only && counted > 1 && <p className="text-sm text-ink-3">Getting started · step {i + 1} of {counted}</p>}
+      {joined && !only && i === 0 && (
+        <p className="mt-2 rounded-xl bg-brand-soft px-3 py-2 text-[15px] text-brand">You&apos;ve joined {app.householdName}. {inviter} has already set up the household, so there&apos;s nothing to set up twice: just your own week.</p>
+      )}
       {current === "children" && <ChildrenStep onNext={next} />}
-      {current === "letters" && <LettersStep ai={ai} onNext={next} onBreaks={() => setBreaksAdded(true)} />}
+      {current === "letters" && <LettersStep ai={ai} onNext={next} />}
       {current === "holidays" && <HolidaysStep onNext={next} />}
       {current === "work" && <WorkStep onNext={next} />}
       {current === "calendar" && <CalendarStep onNext={next} />}
       {current === "invite" && <InviteStep onNext={next} />}
-      {current === "done" && (
+      {current === "done" && only && (
         <div>
-          <h1 className="mt-2 font-display text-3xl">Your week is taking shape</h1>
-          <p className="mt-2 text-ink-2">Now pick one thing for each of you this week. It takes about ten minutes, and {app.partner ? `${app.partner.displayName} can answer everything in one go` : "your partner can answer everything in one go once they join"}.</p>
+          <h1 className="mt-2 font-display text-3xl">Done</h1>
+          <p className="mt-2 text-ink-2">Anything else can wait. Today shows what&apos;s left, whenever you have a minute.</p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Link href="/plan" className="inline-flex min-h-11 items-center rounded-full bg-brand px-5 text-white">Plan this week</Link>
-            <Link href="/today" className="inline-flex min-h-11 items-center rounded-full border border-line px-5">Go to Today</Link>
+            <Link href="/today" className="inline-flex min-h-11 items-center rounded-full bg-brand px-5 text-white">Back to Today</Link>
+          </div>
+        </div>
+      )}
+      {current === "done" && !only && (
+        <div>
+          <h1 className="mt-2 font-display text-3xl">{joined ? "You're all set" : "Your week is taking shape"}</h1>
+          <p className="mt-2 text-ink-2">
+            {joined
+              ? `Today shows anything ${inviter} has asked of you, and what's coming up. Turn on notifications in Settings so a request reaches you without opening More.`
+              : `Now pick one thing for each of you this week. It takes about ten minutes, and ${app.partner ? `${app.partner.displayName} can answer everything in one go` : "your partner can answer everything in one go once they join"}. School holidays and your calendar can wait: Today has a card for each.`}
+          </p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            {joined ? (
+              <>
+                <Link href="/today" className="inline-flex min-h-11 items-center rounded-full bg-brand px-5 text-white">Go to Today</Link>
+                <Link href="/settings#notifications" className="inline-flex min-h-11 items-center rounded-full border border-line px-5">Turn on notifications</Link>
+              </>
+            ) : (
+              <>
+                <Link href="/plan" className="inline-flex min-h-11 items-center rounded-full bg-brand px-5 text-white">Plan this week</Link>
+                <Link href="/today" className="inline-flex min-h-11 items-center rounded-full border border-line px-5">Go to Today</Link>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -94,13 +124,16 @@ function StepFrame({ title, intro, children, onSkip, onSave, saveLabel, pending,
 
 function ChildrenStep({ onNext }: { onNext: () => void }) {
   const app = useApp();
+  const router = useRouter();
   const { run, pending, error } = useCommand(app.householdId);
   const [rows, setRows] = useState([{ name: "", band: "5-7" as (typeof AGE_BANDS)[number] }]);
   async function save() {
     for (const r of rows.filter((r) => r.name.trim())) {
       if (!(await run("AddChild", { preferredName: r.name, ageBand: r.band }, { refresh: false }))) return;
     }
-    window.location.reload();
+    // Refresh in place: a reload would rebuild the steps and restart the count ("1 of 6" twice).
+    router.refresh();
+    onNext();
   }
   return (
     <StepFrame title="Who are the children?" intro="First names and an age range are enough. More never asks for birth dates." onSkip={onNext} onSave={save} saveLabel="Save and continue" pending={pending} error={error?.message}>
@@ -120,7 +153,7 @@ function ChildrenStep({ onNext }: { onNext: () => void }) {
 }
 
 /** The household desk, as the first way in: the dates come from the letters the family already gets. */
-function LettersStep({ ai, onNext, onBreaks }: { ai: boolean; onNext: () => void; onBreaks: () => void }) {
+function LettersStep({ ai, onNext }: { ai: boolean; onNext: () => void }) {
   const [added, setAdded] = useState(0);
   return (
     <div>
@@ -129,7 +162,7 @@ function LettersStep({ ai, onNext, onBreaks }: { ai: boolean; onNext: () => void
         Paste the school&apos;s term dates, a letter, a club timetable or a booking{ai ? ", or add a photo or PDF of one" : ""}. More picks out the dates and you check each one before anything goes in the diary. Do as many as you like now; the Household desk is always in the menu for the next one.
       </p>
       <div className="mt-4">
-        <DeskBoard ai={ai} embedded onAdded={(r) => { setAdded((n) => n + r.length); if (r.some((x) => x.targetType === "holiday")) onBreaks(); }} />
+        <DeskBoard ai={ai} embedded onAdded={(r) => setAdded((n) => n + r.length)} />
       </div>
       <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-line pt-4">
         <Button variant="primary" onClick={onNext}>{added ? "Continue" : "Skip for now"}</Button>
@@ -158,7 +191,7 @@ function HolidaysStep({ onNext }: { onNext: () => void }) {
   return (
     <StepFrame
       title="School holidays"
-      intro="Add this school year's holidays and More shows every day that needs childcare. Copy the dates from your school or council's term dates page (for Surrey schools, search “Surrey term dates”). Fill in as many as you have."
+      intro="Add this school year's holidays and More shows every day that needs childcare. Copy the dates from your school or council's term dates page, or paste that page into the Household desk instead. Fill in as many as you have."
       onSkip={onNext}
       onSave={save}
       saveLabel="Save and continue"
@@ -230,7 +263,7 @@ function WorkStep({ onNext }: { onNext: () => void }) {
         <Field label="Until">{(id) => <input id={id} type="time" className={`${inputClass} w-32`} value={end} onChange={(e) => setEnd(e.target.value)} />}</Field>
         <Field label="Commute each way (min)">{(id) => <input id={id} inputMode="numeric" className={`${inputClass} w-32`} value={commute} onChange={(e) => setCommute(e.target.value.replace(/\D/g, ""))} />}</Field>
       </div>
-      <p className="text-xs text-ink-3">Different every week? Skip this and connect your work calendar next instead.</p>
+      <p className="text-xs text-ink-3">Different every week? Skip this and connect your work calendar instead, from the card on Today.</p>
     </StepFrame>
   );
 }
@@ -256,8 +289,6 @@ function InviteStep({ onNext }: { onNext: () => void }) {
   const app = useApp();
   const { run, pending, error } = useCommand(app.householdId);
   const [link, setLink] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const message = link ? `I've set us up on More so we can plan time for us, for the kids and for each of us. Join here: ${link}` : "";
   return (
     <div>
       <h1 className="mt-2 font-display text-3xl">Invite your partner</h1>
@@ -269,14 +300,7 @@ function InviteStep({ onNext }: { onNext: () => void }) {
             if (r) setLink(`${window.location.origin}/join/${r.token}`);
           }}>Make an invitation link</Button>
         ) : (
-          <>
-            <p className="text-sm">Send it yourself. It works once and expires in 7 days.</p>
-            <div className="flex flex-wrap gap-2">
-              <a className="inline-flex min-h-11 items-center rounded-full bg-brand px-4 text-white" href={`https://wa.me/?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer">WhatsApp</a>
-              <a className="inline-flex min-h-11 items-center rounded-full border border-line px-4" href={`sms:?&body=${encodeURIComponent(message)}`}>Text message</a>
-              <Button onClick={async () => { await navigator.clipboard.writeText(message).catch(() => {}); setCopied(true); }}>{copied ? "Copied" : "Copy"}</Button>
-            </div>
-          </>
+          <InviteShare link={link} />
         )}
         <ErrorNote message={error?.message} />
       </Card>
