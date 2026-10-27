@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApp } from "./app-context";
 import { addDaysStr, mondayOf, todayIn } from "./format";
 import { Button, Card, ErrorNote, Field, inputClass } from "./ui";
@@ -127,16 +127,24 @@ function ChildrenStep({ onNext }: { onNext: () => void }) {
   const router = useRouter();
   const { run, pending, error } = useCommand(app.householdId);
   const [rows, setRows] = useState([{ name: "", band: "5-7" as (typeof AGE_BANDS)[number] }]);
+  const [saved, setSaved] = useState(false);
+  // Move on once the refreshed household has the children, so the letters step
+  // can put school breaks against them.
+  useEffect(() => {
+    if (saved && app.children.length > 0) onNext();
+  }, [saved, app.children.length, onNext]);
   async function save() {
-    for (const r of rows.filter((r) => r.name.trim())) {
+    const named = rows.filter((r) => r.name.trim());
+    for (const r of named) {
       if (!(await run("AddChild", { preferredName: r.name, ageBand: r.band }, { refresh: false }))) return;
     }
+    if (!named.length) return onNext();
     // Refresh in place: a reload would rebuild the steps and restart the count ("1 of 6" twice).
     router.refresh();
-    onNext();
+    setSaved(true);
   }
   return (
-    <StepFrame title="Who are the children?" intro="First names and an age range are enough. More never asks for birth dates." onSkip={onNext} onSave={save} saveLabel="Save and continue" pending={pending} error={error?.message}>
+    <StepFrame title="Who are the children?" intro="First names and an age range are enough. More never asks for birth dates." onSkip={onNext} onSave={save} saveLabel="Save and continue" pending={pending || saved} error={error?.message}>
       {rows.map((r, n) => (
         <div key={n} className="flex gap-2">
           <label className="sr-only" htmlFor={`child-${n}`}>Child {n + 1} name</label>
