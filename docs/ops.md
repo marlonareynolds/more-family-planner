@@ -38,7 +38,7 @@ its database, 503 when it can't. No secret, nothing else in the answer.
 
 The hourly GitHub "Health check" workflow is the deeper check (scheduler,
 backlog, failed reminders, AI spend) and emails on failure, but GitHub runs
-scheduled jobs late: in the week to 27 October 2026 it ran every 3 to 7
+scheduled jobs late: in the three days to 27 October 2026 it ran every 2½ to 7½
 hours, not hourly. So an outside monitor watches the live check every few
 minutes.
 
