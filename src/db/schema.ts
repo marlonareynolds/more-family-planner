@@ -1142,6 +1142,22 @@ export const opsRuns = pgTable("ops_runs", {
 });
 
 /**
+ * Request counters shared by every server instance, one row per caller and
+ * limit, for the current fixed window only. The key is a hash, so no address
+ * or account id is stored; expired rows are swept by the scheduler.
+ */
+export const rateLimits = pgTable(
+  "rate_limits",
+  {
+    key: text("key").primaryKey(),
+    bucket: bigint("bucket", { mode: "number" }).notNull(),
+    count: integer("count").notNull(),
+    expiresAt: ts("expires_at").notNull(),
+  },
+  (t) => [index("rate_limits_expires_idx").on(t.expiresAt)],
+);
+
+/**
  * Messages sent through the support page. The sender's own words; only the
  * operator reads them. An account is attached only if they were signed in.
  */

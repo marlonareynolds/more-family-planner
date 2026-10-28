@@ -1,5 +1,6 @@
 import { getDb } from "@/db/client";
 import { authorizedCron } from "@/server/ops/cron-auth";
+import { reportError } from "@/server/ops/error-report";
 import { runTick } from "@/server/tick";
 
 export const maxDuration = 60;
@@ -12,6 +13,9 @@ export const maxDuration = 60;
 export async function GET(req: Request) {
   if (!authorizedCron(req)) return new Response("Not found", { status: 404 });
   const { stats, errors } = await runTick(await getDb());
-  if (errors.length) console.error("[tick]", errors.join("; "));
+  if (errors.length) {
+    console.error("[tick]", errors.join("; "));
+    reportError(new Error(`tick: ${errors.join("; ")}`));
+  }
   return Response.json({ ok: errors.length === 0, errors, stats }, { status: errors.length ? 500 : 200, headers: { "Cache-Control": "no-store" } });
 }

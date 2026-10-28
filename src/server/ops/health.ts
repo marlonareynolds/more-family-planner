@@ -1,6 +1,7 @@
 import { and, count, eq, gte, inArray, isNull, lt, min } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { notifications, opsRuns, outbox, supportRequests } from "@/db/schema";
+import { spendByHousehold } from "../desk-ai";
 
 /**
  * Operational signals for the one person running More: did the scheduler
@@ -79,6 +80,14 @@ export async function healthChecks(db: Db, now = new Date()): Promise<HealthChec
     name: "Support",
     ok: true,
     detail: support?.n ? `${support.n} messages waiting, oldest ${ago(nowMs - new Date(support.oldest!).getTime())} ago` : "No messages waiting",
+  });
+  // Warn before the ceiling bites, while there is still time to raise it.
+  const ai = await spendByHousehold(db, now);
+  const near = ai.households.filter((h) => h.settledPence + h.runningPence >= h.allowancePence * 0.8).length;
+  checks.push({
+    name: "AI reader spend",
+    ok: ai.totalPence < ai.ceilingPence * 0.9,
+    detail: `This month: ${ai.totalPence}p of the ${ai.ceilingPence}p ceiling across ${ai.households.length} households${near ? `; ${near} near their own allowance` : ""}`,
   });
   return checks;
 }
