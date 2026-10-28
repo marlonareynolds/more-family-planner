@@ -1,3 +1,4 @@
+import type { Features } from "@/lib/flags";
 import type { PlaceView } from "@/lib/places";
 import type { WeekView } from "@/server/queries/week";
 
@@ -15,6 +16,8 @@ export interface AppInfo {
   usShelf: string[] | null;
   /** The household's town, for "near you" links. */
   placeName: string | null;
+  /** Which hideable parts of More are switched on. */
+  features: Features;
 }
 
 export function infoFrom(w: WeekView): AppInfo {
@@ -30,6 +33,7 @@ export function infoFrom(w: WeekView): AppInfo {
     places: w.places,
     usShelf: w.usShelf,
     placeName: w.place?.name ?? null,
+    features: w.features,
   };
 }
 

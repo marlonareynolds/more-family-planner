@@ -5,6 +5,7 @@ import { DinnerPlanner, ShoppingList } from "@/components/dinners";
 import { WeekBoard } from "@/components/week-board";
 import { getDb } from "@/db/client";
 import { currentActor } from "@/server/auth";
+import { shown } from "@/lib/flags";
 import { loadWeek } from "@/server/page-data";
 import { balanceFor } from "@/server/queries/balance";
 import { freeTogetherIn } from "@/server/queries/free-time";
@@ -17,7 +18,8 @@ export default async function WeekPage(props: PageProps<"/week">) {
   const week = await loadWeek(w);
   const actor = (await currentActor())!;
   const db = await getDb();
-  const balance = await balanceFor(db, actor, week.household.id);
+  // "How time has been shared" reads as a scorecard: hidden for the household test.
+  const balance = shown("time-shared") ? await balanceFor(db, actor, week.household.id) : null;
   // Evenings free for you both, as a fact both of you see.
   const freeTogether = await freeTogetherIn(db, actor, week);
   const meals = await mealsFor(db, actor, week.weekKey, 7);
@@ -26,7 +28,7 @@ export default async function WeekPage(props: PageProps<"/week">) {
       <WeekBoard week={week} freeTogether={freeTogether} />
       <DinnerPlanner data={meals} days={week.days} offers={easyDinnerOffers(week, meals)} />
       <ShoppingList lines={meals.shopping} />
-      <BalanceCard balance={balance} />
+      {balance && <BalanceCard balance={balance} />}
     </AppProvider>
   );
 }

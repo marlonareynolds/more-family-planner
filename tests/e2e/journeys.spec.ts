@@ -58,12 +58,14 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   await alex.waitForLoadState("networkidle");
   await axe(alex);
 
-  // Getting started: add a child, then skip the rest for now
+  // Getting started: three steps at most. Add a child, then skip the rest for now;
+  // holidays, the working week and a calendar wait on Today as optional cards.
   await alex.getByLabel("Child 1 name").fill("Robin");
   await alex.getByRole("button", { name: "Save and continue" }).click();
   await expect(alex.getByRole("heading", { name: "Add your school letters" })).toBeVisible();
+  await expect(alex.getByText("step 2 of 3")).toBeVisible();
   await axe(alex);
-  for (const next of ["School holidays", "Your usual week", "Connect a calendar", "Invite your partner"]) {
+  for (const next of ["Invite your partner"]) {
     await alex.getByRole("button", { name: "Skip for now" }).click();
     await expect(alex.getByRole("heading", { name: next })).toBeVisible();
   }
@@ -92,12 +94,18 @@ test("two adults: set up, invite, plan a date, agree, journal stays private", as
   await axe(kitchen);
   await kitchenContext.close();
 
-  // Sam joins
+  // Sam joins: the link says who it's from, and Sam only adds their own week
   const sam = await adult(browser, `Sam ${tag}`, vp);
   await go(sam, new URL(link).pathname);
+  await expect(sam.getByRole("heading", { name: new RegExp(`Alex ${tag} has invited you to join Household ${tag}`) })).toBeVisible();
   await axe(sam);
   await sam.getByRole("button", { name: /join/i }).click();
   await sam.waitForURL(/\/welcome/);
+  await expect(sam.getByText(/nothing to set up twice/)).toBeVisible();
+  await expect(sam.getByRole("heading", { name: "Your usual week" })).toBeVisible();
+  // A used link says so, rather than looking valid until tapped.
+  await go(sam, new URL(link).pathname);
+  await expect(sam.getByRole("heading", { name: "This link no longer works" })).toBeVisible();
 
   // Alex plans an evening for the two of them and invites Sam
   await go(alex, "/us");
@@ -396,7 +404,7 @@ test("a new household adds its first school letter during setup, and the desk st
 
   // Step 2 of Getting started is the household desk.
   await expect(alex.getByRole("heading", { name: "Add your school letters" })).toBeVisible();
-  await expect(alex.getByText(/step 1 of/)).toBeVisible();
+  await expect(alex.getByText("step 2 of 3")).toBeVisible();
   const uk = (d: string) => d.split("-").reverse().join("/");
   await alex.getByLabel("Letter, email or booking").fill(`Half term is from ${uk(inDays(20))} to ${uk(inDays(24))}.\nSports day: ${uk(inDays(9))}, 1.30pm - 3pm.`);
   await alex.getByRole("button", { name: "Read it" }).click();
@@ -406,9 +414,9 @@ test("a new household adds its first school letter during setup, and the desk st
   await expect(alex.getByText("2 things added so far.")).toBeVisible();
   await alex.screenshot({ path: `test-results/welcome-letters-${info.project.name}.png`, fullPage: true });
 
-  // Half term came from the letter, so the holidays form is skipped.
+  // The last of three steps is the invitation; holidays and the working week are optional cards on Today.
   await alex.getByRole("button", { name: "Continue" }).click();
-  await expect(alex.getByRole("heading", { name: "Your usual week" })).toBeVisible();
+  await expect(alex.getByRole("heading", { name: "Invite your partner" })).toBeVisible();
 
   // Today: the desk is one tap away, and the setup list counts the letter as done.
   await go(alex, "/today");

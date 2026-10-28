@@ -31,6 +31,8 @@ export default defineConfig({
     env: {
       PGLITE_DIR: `.data/e2e-${Date.now()}`,
       MORE_SESSION_SECRET: "e2e-only-not-a-secret-0123456789abcdef",
+      // The journeys still cover the parts hidden for the household test.
+      MORE_SHOW: "all",
     },
   },
 });

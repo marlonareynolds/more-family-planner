@@ -85,6 +85,10 @@ saying data can reset at any time. Never use this with real families.
 
 ## Not switched on yet
 
+- Hidden for the household test, not deleted: the Trial page in the menu
+  (its link still works), "How time has been shared", Our places, Look back,
+  Quiet your phone and weather. `MORE_SHOW` brings any back (`src/lib/flags.ts`).
+
 - The AI concierge is off: no paid API calls until the founder approves.
 - Email and push delivery stay off until their keys are added (see Deploy).
 - Photos on shared memories: text only until a DPIA is done.

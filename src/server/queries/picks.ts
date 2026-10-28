@@ -82,9 +82,9 @@ export async function picksFor(
 
   // One free-time search per length and time of day, shared between picks.
   const cache = new Map<string, Awaited<ReturnType<typeof freeTimesFor>>>();
-  const keyOf = (a: (typeof chosen)[number]) => `${slotMinutes(a)}|${a.startBetween?.join("-") ?? ""}`;
+  const keyOf = (a: (typeof chosen)[number]) => `${slotMinutes(a)}|${a.startBetween?.join("-") ?? ""}|${a.duringWork ? "w" : ""}`;
   for (const a of chosen) {
-    if (!cache.has(keyOf(a))) cache.set(keyOf(a), await freeTimesFor(db, actor, kind, slotMinutes(a)!, from, days, a.startBetween));
+    if (!cache.has(keyOf(a))) cache.set(keyOf(a), await freeTimesFor(db, actor, kind, slotMinutes(a)!, from, days, a.startBetween, { duringWork: a.duringWork }));
   }
   const slots = pairSlots(chosen, (a) => cache.get(keyOf(a))?.slots ?? []);
   const partner = adults.find((a) => a.id !== actor.accountId);

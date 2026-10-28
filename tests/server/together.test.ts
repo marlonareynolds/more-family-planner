@@ -157,6 +157,7 @@ describe("the village and picks", () => {
     expect(new Set(res.picks.map((p) => p.activity.category)).size).toBe(3);
     expect(res.picks.every((p) => p.slot)).toBe(true);
     expect(new Set(res.picks.map((p) => p.slot!.date)).size).toBe(3);
-    expect(res.picks.every((p) => p.carer.kind === "helper" && p.carer.name === "Gran")).toBe(true);
+    // A weekday lunch falls while Robin is at school, so nobody else is needed then.
+    expect(res.picks.every((p) => (p.carer.kind === "helper" && p.carer.name === "Gran") || (p.activity.key === "us-lunch-midweek" && p.carer.kind === "arranged"))).toBe(true);
   });
 });

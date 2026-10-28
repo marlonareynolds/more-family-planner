@@ -2,6 +2,8 @@ import { BookHeart } from "lucide-react";
 import Link from "next/link";
 import { fmtDate } from "@/components/format";
 import { Card, EmptyState, SectionTitle } from "@/components/ui";
+import { notFound } from "next/navigation";
+import { shown } from "@/lib/flags";
 import { requireHousehold } from "@/server/page-data";
 import { lookBackFor } from "@/server/queries/look-back";
 import { instantToLocalDate } from "@/domain/time";
@@ -17,6 +19,7 @@ const KIND = { me: "Me", us: "Us", family: "Family" } as const;
 
 /** "Your October": the moments you made, told as memories, not metrics. */
 export default async function LookBackPage({ searchParams }: PageProps<"/look-back">) {
+  if (!shown("look-back")) notFound();
   const sp = await searchParams;
   const { actor, db, household } = await requireHousehold();
   const thisMonth = instantToLocalDate(new Date().getTime(), household.timeZone).slice(0, 7);

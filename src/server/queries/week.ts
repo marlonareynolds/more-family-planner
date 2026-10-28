@@ -45,6 +45,7 @@ import { CATALOGUE } from "@/lib/catalogue";
 import { placeActivities } from "@/lib/places";
 import { dayWeather, isWet, rainDuring, swapOptions, type DayWeather, type SwapOption } from "@/domain/weather";
 import { activityFor, forecastFor } from "../weather";
+import { features, type Features } from "@/lib/flags";
 
 /**
  * The viewer-specific week projection (spec 12.2 GET /weeks/{weekKey}).
@@ -287,6 +288,8 @@ export interface WeekView {
   wishes: { id: string; childId: string; title: string; activityKey: string; createdAt: string }[];
   /** The child whose turn it is to choose a family plan: whoever chose least recently. */
   turnToChoose: string | null;
+  /** Which hideable parts of More are switched on (see lib/flags). */
+  features: Features;
 }
 
 export interface WetPlan {
@@ -787,6 +790,7 @@ export async function getProjection(db: Db, actor: Actor, fromDate: string, days
     wetPlans,
     wishes: wishRows.filter((w) => kids.some((k) => k.id === w.childId)).map((w) => ({ id: w.id, childId: w.childId, title: w.title, activityKey: w.activityKey, createdAt: w.createdAt.toISOString() })),
     turnToChoose,
+    features: features(),
     nextFamilyTrip: await nextFamilyTrip(db, household.id, now),
     markers: Object.fromEntries(dayList.flatMap((d) => {
       const name = bankHoliday(d, tz);

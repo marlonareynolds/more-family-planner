@@ -110,21 +110,61 @@ function daysBetween(a: string, b: string): number {
   return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 }
 
-/** A date with no year is the next one: letters are about what's coming. */
-function withYear(m: number, d: number, today: string): string | null {
+/**
+ * A date with no year is the next one: letters are about what's coming. It
+ * is uncertain when it only just passed this year (a deadline from an old
+ * letter, not one a year from now).
+ */
+function withYear(m: number, d: number, today: string): { date: string; certain: boolean } | null {
   const y = +today.slice(0, 4);
   for (const year of [y, y + 1]) {
     if (!validDate(year, m, d)) continue;
     const date = iso(year, m, d);
-    if (daysBetween(today, date) >= -14) return date;
+    if (daysBetween(today, date) < -14) continue;
+    const thisYear = validDate(y, m, d) ? iso(y, m, d) : null;
+    return { date, certain: year === y || !thisYear || daysBetween(today, thisYear) < -90 };
   }
   return null;
+}
+
+const DAY_NAMES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const NAMED_DAY = /^(mon|tue|wed|thu|fri|sat|sun)/i;
+
+/** 0 for Sunday to 6 for Saturday. */
+function weekdayOf(date: string): number {
+  return new Date(`${date}T12:00:00Z`).getUTCDay();
+}
+
+/**
+ * Settle a date against the weekday the letter gave with it. A weekday that
+ * fits only a date a few weeks ago means an old letter: that date, which has
+ * passed. One that fits no nearby year is a mistake in the letter, so the
+ * date is kept but marked for checking rather than guessed.
+ */
+function settle(p: { d: number; m: number; y: number | null }, weekday: number | null, today: string): { date: string; certain: boolean } | null {
+  if (p.y !== null) {
+    if (!validDate(p.y, p.m, p.d)) return null;
+    const date = iso(p.y, p.m, p.d);
+    return { date, certain: weekday === null || weekdayOf(date) === weekday };
+  }
+  const next = withYear(p.m, p.d, today);
+  if (!next || weekday === null || weekdayOf(next.date) === weekday) return next;
+  const y = +today.slice(0, 4);
+  const recent = [y - 1, y]
+    .filter((year) => validDate(year, p.m, p.d))
+    .map((year) => iso(year, p.m, p.d))
+    .find((date) => weekdayOf(date) === weekday && daysBetween(today, date) < 0 && daysBetween(today, date) >= -60);
+  return recent ? { date: recent, certain: true } : { date: next.date, certain: false };
 }
 
 interface Found {
   start: number;
   end: number;
   date: string;
+  /** False when the weekday given doesn't fit the date, or the year had to be guessed. */
+  certain: boolean;
+  /** The weekday written with the date, 0 for Sunday, if any. */
+  weekday: number | null;
   /** Set when "20 - 24 October" gives the first day of a range. */
   rangeTo?: string;
 }
@@ -135,15 +175,15 @@ function findDates(line: string, today: string): Found[] {
     re.lastIndex = 0;
     for (let m = re.exec(line); m; m = re.exec(line)) {
       const p = parts(m);
-      let date: string | null = null;
-      if (p.y !== null) date = validDate(p.y, p.m, p.d) ? iso(p.y, p.m, p.d) : null;
-      else date = withYear(p.m, p.d, today);
-      if (!date) continue;
+      const named = NAMED_DAY.exec(m[0]);
+      const weekday = named ? DAY_NAMES.indexOf(named[1].toLowerCase()) : null;
+      const settled = settle(p, weekday, today);
+      if (!settled) continue;
       const start = m.index;
       const end = m.index + m[0].length;
       // The first pattern to claim some text wins.
       if (found.some((f) => start < f.end && end > f.start)) continue;
-      found.push({ start, end, date });
+      found.push({ start, end, date: settled.date, certain: settled.certain, weekday });
     }
   }
   // "20 - 24 October": give the bare first day the second date's month and year.
@@ -156,7 +196,7 @@ function findDates(line: string, today: string): Found[] {
     const [y, mo] = next.date.split("-").map(Number);
     const d = +m[1];
     if (!validDate(y, mo, d) || iso(y, mo, d) > next.date) continue;
-    found.push({ start, end: next.end, date: iso(y, mo, d), rangeTo: next.date });
+    found.push({ start, end: next.end, date: iso(y, mo, d), certain: next.certain, weekday: null, rangeTo: next.date });
     found.splice(found.indexOf(next), 1);
   }
   return found.sort((a, b) => a.start - b.start);
@@ -433,6 +473,29 @@ function detailsOf(sentence: string): string {
   return sentence.length > 200 ? `${sentence.slice(0, 199)}…` : sentence;
 }
 
+const EVERY_DAY = /\b(?:every|each)\s+(mon|tues|wednes|thurs|fri|satur|sun)day/i;
+
+/** "Every Monday" said of a first date that isn't a Monday. */
+function repeatDayClash(sentence: string, startDate: string): boolean {
+  const m = EVERY_DAY.exec(sentence);
+  return !!m && DAY_NAMES.indexOf(m[1].slice(0, 3).toLowerCase()) !== weekdayOf(startDate);
+}
+
+/**
+ * Whether a line from a letter gives a weekday that doesn't fit the date it
+ * was read as ("Sunday 16 November" when 16 November is a Monday), or says
+ * "every Monday" of a date that isn't one. Used on every Desk card, whichever
+ * reader made it, so a mismatch is flagged, never guessed.
+ */
+export function weekdayClash(source: string, startDate: string): boolean {
+  if (repeatDayClash(source, startDate)) return true;
+  const [y, m, d] = startDate.split("-").map(Number);
+  return findDates(source, startDate).some((f) => {
+    const [fy, fm, fd] = f.date.split("-").map(Number);
+    return f.weekday !== null && fm === m && fd === d && (fy === y || !/\b\d{4}\b/.test(source)) && f.weekday !== weekdayOf(startDate);
+  });
+}
+
 function repeatOf(sentence: string): Proposal["repeat"] {
   if (/\bfortnightly\b|\bevery (?:other|second)\b/i.test(sentence)) return "fortnightly";
   if (/\bmonthly\b|\bevery month\b/i.test(sentence)) return "monthly";
@@ -455,21 +518,24 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
   type Pushed = Omit<Proposal, "key" | "childIds" | "past" | "endStated" | "arriveBy" | "location" | "details" | "repeat" | "repeatUntil" | "forWhom" | "dateCertain" | "pickupChange" | "collectAt" | "forItem"> & {
     section: number;
     explicitEnd: boolean;
+    dateCertain: boolean;
     pickupChange?: boolean;
     collectAt?: string | null;
   };
   const push = (p: Pushed, sentence: string) => {
     const lineChildren = childrenIn(sentence, ctx.children);
+    const repeat = p.kind === "event" && p.role === "event" ? repeatOf(sentence) : null;
     out.push({
       ...p,
       endStated: p.explicitEnd,
       arriveBy: null,
       location: "",
       details: detailsOf(sentence),
-      repeat: p.kind === "event" && p.role === "event" ? repeatOf(sentence) : null,
+      repeat,
       repeatUntil: null,
       forWhom: sentence.match(FOR_WHOM)?.[0] ?? null,
-      dateCertain: true,
+      // "Every Monday" from a date that isn't a Monday: check it, don't repeat it on the wrong day.
+      dateCertain: p.dateCertain && !(repeat && repeatDayClash(sentence, p.startDate)),
       pickupChange: p.pickupChange ?? false,
       collectAt: p.pickupChange ? (p.collectAt ?? null) : null,
       forItem: null,
@@ -497,13 +563,13 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
       if (session && times.length >= 2) {
         const parent = out.filter((p) => p.section === s.section && p.role === "event").at(0)!;
         parent.sessions++;
-        push({ kind: "event", role: "event", title: `${parent.title} — ${session[1].trim()}`, startDate: parent.startDate, endDate: parent.endDate, startTime: times[0].time, endTime: times[1].time, source: line, section: s.section, explicitEnd: true }, line);
+        push({ kind: "event", role: "event", title: `${parent.title} — ${session[1].trim()}`, startDate: parent.startDate, endDate: parent.endDate, startTime: times[0].time, endTime: times[1].time, source: line, section: s.section, explicitEnd: true, dateCertain: parent.dateCertain }, line);
         continue;
       }
       // Another thing on the same day: "Sibling photographs will be taken from 8:15am".
       const who = subjectOf(line);
       if (who && !HINT_WORDS.test(line)) {
-        push({ kind: "event", role: "event", title: who, startDate: last.startDate, endDate: last.endDate, startTime: times[0].time, endTime: sameDayEnd(times[0].time, times[1]?.time, 60), source: line, section: s.section, explicitEnd: !!times[1] && times[1].time > times[0].time }, line);
+        push({ kind: "event", role: "event", title: who, startDate: last.startDate, endDate: last.endDate, startTime: times[0].time, endTime: sameDayEnd(times[0].time, times[1]?.time, 60), source: line, section: s.section, explicitEnd: !!times[1] && times[1].time > times[0].time, dateCertain: last.dateCertain }, line);
         continue;
       }
       // A time for the item above: "arrive at 8:45am and return by 3:45pm", "finish by 10:00am".
@@ -524,22 +590,22 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
     }
 
     // Two dates joined by "to" or "-" are one span.
-    const spans: { from: string; to: string; at: number }[] = [];
+    const spans: { from: string; to: string; at: number; certain: boolean }[] = [];
     // "Closes on Friday 19 December and reopens on Monday 5 January": the break is the days between.
     const closingSpan = (HOLIDAY_WORDS.test(line) || LAST_DAY.test(line)) && REOPEN_WORDS.test(line) && dates.length === 2 && !dates[0].rangeTo && daysBetween(dates[0].date, dates[1].date) >= 2 && daysBetween(dates[0].date, dates[1].date) <= 60;
-    if (closingSpan) spans.push({ from: addDays(dates[0].date, 1), to: addDays(dates[1].date, -1), at: dates[0].start });
+    if (closingSpan) spans.push({ from: addDays(dates[0].date, 1), to: addDays(dates[1].date, -1), at: dates[0].start, certain: dates[0].certain && dates[1].certain });
     for (let i = 0; i < (closingSpan ? 0 : dates.length); i++) {
       const d = dates[i];
       if (d.rangeTo) {
-        spans.push({ from: d.date, to: d.rangeTo, at: d.start });
+        spans.push({ from: d.date, to: d.rangeTo, at: d.start, certain: d.certain });
         continue;
       }
       const next = dates[i + 1];
       if (next && !next.rangeTo && RANGE_GAP.test(line.slice(d.end, next.start)) && next.date >= d.date && daysBetween(d.date, next.date) <= 60) {
-        spans.push({ from: d.date, to: next.date, at: d.start });
+        spans.push({ from: d.date, to: next.date, at: d.start, certain: d.certain && next.certain });
         i++;
       } else {
-        spans.push({ from: d.date, to: d.date, at: d.start });
+        spans.push({ from: d.date, to: d.date, at: d.start, certain: d.certain });
       }
     }
     if (REPEATS.test(line)) spans.splice(1);
@@ -604,6 +670,7 @@ export function readLetter(text: string, ctx: ReadContext): Proposal[] {
           source: line,
           section: s.section,
           explicitEnd,
+          dateCertain: span.certain,
           pickupChange: earlyClose || endsAt || (optional && CLOSING.test(line) && times.length > 0),
           collectAt: times[0]?.time ?? null,
         },

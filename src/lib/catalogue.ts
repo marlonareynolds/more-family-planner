@@ -44,6 +44,8 @@ export interface Activity {
   stepFree?: boolean;
   /** When it makes sense to start, local "HH:MM" to "HH:MM": no stargazing at breakfast. */
   startBetween?: [string, string];
+  /** A break taken from the working day (a long lunch): offered on working days, inside usual working hours. */
+  duringWork?: boolean;
   /** A shorter, easier version for low-energy weeks. */
   simpler?: string;
   backup?: string;
@@ -108,7 +110,7 @@ export const CATALOGUE: Activity[] = [
   { key: "us-class", kind: "us", title: "Try a class together", summary: "Pottery, salsa, climbing or a cookery class, a one-off taster.", category: "making", typicalCostMinor: 6000, durationMinutes: 150, setting: "out-indoors", preparation: "medium", weatherSensitive: false, sensoryLoad: "medium", accessNotes: "Ask the venue about access when booking.", owner, reviewBy },
   { key: "us-sunset-walk", startBetween: ["17:00", "20:00"], kind: "us", title: "Sunset walk", summary: "Forty minutes to a viewpoint while someone you trust is at home with the children.", category: "outdoors", typicalCostMinor: 0, durationMinutes: 60, setting: "outdoors", preparation: "low", weatherSensitive: true, sensoryLoad: "low", accessNotes: "", backup: "A drink by the window and the same no-phones rule.", owner, reviewBy },
   { key: "us-questions", kind: "us", title: "The question jar", summary: "Take turns drawing a question you've never asked each other.", category: "ritual", typicalCostMinor: 0, durationMinutes: 45, setting: "home", preparation: "low", weatherSensitive: false, sensoryLoad: "low", accessNotes: "", stepFree: true, owner, reviewBy },
-  { key: "us-lunch-midweek", startBetween: ["12:00", "13:00"], kind: "us", title: "Midweek lunch", summary: "Meet near one of your workplaces while the children are at school.", category: "food", typicalCostMinor: 3000, durationMinutes: 75, setting: "out-indoors", preparation: "low", weatherSensitive: false, sensoryLoad: "medium", accessNotes: "", stepFree: true, owner, reviewBy },
+  { key: "us-lunch-midweek", startBetween: ["12:00", "13:00"], duringWork: true, kind: "us", title: "Midweek lunch", summary: "Meet near one of your workplaces while the children are at school.", category: "food", typicalCostMinor: 3000, durationMinutes: 75, setting: "out-indoors", preparation: "low", weatherSensitive: false, sensoryLoad: "medium", accessNotes: "", stepFree: true, owner, reviewBy },
   { key: "us-night-away", kind: "us", title: "A night away", summary: "One night somewhere close, with the children covered.", category: "ritual", typicalCostMinor: 20000, durationMinutes: 1440, setting: "out-indoors", preparation: "high", weatherSensitive: false, sensoryLoad: "low", accessNotes: "Book an accessible room if needed.", simpler: "An evening at a hotel bar, home by midnight.", owner, reviewBy },
 
   // More me

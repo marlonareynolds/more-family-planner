@@ -5,6 +5,7 @@ import { accounts, memberships, notifications, pushSubscriptions } from "@/db/sc
 import { BUNDLE_TIMES, MAX_PUSH_ATTEMPTS, PUSH_TTL_MS, bundle, bundleSlotStart, inQuietHours, isTimely, localClock, retryDelayMs, type PushMessage } from "@/domain/reach";
 import { addDays, instantToLocalDate, localToInstantCompatible } from "@/domain/time";
 import { stillRelevant, type NotifyPayload } from "../outbox";
+import { appUrl } from "./email";
 
 /**
  * Web push to installed devices (spec 13.2). It uses the browser's own push
@@ -31,11 +32,22 @@ export function vapidPublicKey(): string | null {
   return process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || null;
 }
 
+/**
+ * Who push services contact about this sender. Apple refuses a placeholder
+ * address, so without VAPID_SUBJECT it is the support address, then the app's own.
+ */
+export function vapidSubject(): string {
+  const set = process.env.VAPID_SUBJECT?.trim();
+  if (set && !/example\.com/i.test(set)) return set;
+  const support = process.env.MORE_SUPPORT_EMAIL?.trim();
+  return support ? `mailto:${support}` : appUrl();
+}
+
 function defaultSender(): PushSender | null {
   const publicKey = vapidPublicKey();
   const privateKey = process.env.VAPID_PRIVATE_KEY;
   if (!publicKey || !privateKey) return null;
-  webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:hello@example.com", publicKey, privateKey);
+  webpush.setVapidDetails(vapidSubject(), publicKey, privateKey);
   return async (target, message) => {
     try {
       const res = await webpush.sendNotification(target, JSON.stringify(message), { TTL: message.ttl ?? 6 * 3600, urgency: "normal", topic: message.tag });

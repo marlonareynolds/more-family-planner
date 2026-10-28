@@ -5,6 +5,7 @@ import { whenPhrase } from "@/domain/discreet";
 import { hiddenReason } from "@/domain/moments";
 import { isWet, rainDuring, type HourPoint } from "@/domain/weather";
 import { CATALOGUE, type Activity } from "@/lib/catalogue";
+import { shown } from "@/lib/flags";
 import { placeAsActivity, placeKey, type PlaceView } from "@/lib/places";
 import type { HttpFetch } from "./calendar-providers";
 import { placesFor } from "./queries/places";
@@ -44,6 +45,8 @@ export async function fetchForecast(latitude: number, longitude: number, http: H
 
 /** Refresh the households whose forecast is missing or due. Best effort, one at a time. */
 export async function refreshForecasts(db: Db, now = new Date(), http: HttpFetch = fetch, limit = 20): Promise<{ refreshed: number; failed: number }> {
+  // Weather is hidden for the household test: no calls to Open-Meteo at all.
+  if (!shown("weather")) return { refreshed: 0, failed: 0 };
   const due = await db
     .select({ id: households.id, lat: households.latitude, lon: households.longitude })
     .from(households)
@@ -68,6 +71,7 @@ export async function refreshForecasts(db: Db, now = new Date(), http: HttpFetch
 }
 
 export async function forecastFor(db: DbOrTx, householdId: string, now = new Date()): Promise<HourPoint[] | null> {
+  if (!shown("weather")) return null;
   const [row] = await db.select().from(weatherForecasts).where(eq(weatherForecasts.householdId, householdId));
   if (!row || now.getTime() - row.fetchedAt.getTime() > TRUST_MS) return null;
   return row.hours as HourPoint[];
@@ -89,6 +93,7 @@ export function activityFor(key: string | null, kind: Activity["kind"], househol
  * plans and your own time only: time for the two of you is never nudged.
  */
 export async function queueWeatherSwaps(db: Db, now = new Date()): Promise<{ queued: number }> {
+  if (!shown("weather")) return { queued: 0 };
   const soon = new Date(now.getTime() + 30 * 3_600_000);
   const rows = await db
     .select({ m: moments, tz: households.timeZone })

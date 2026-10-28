@@ -12,6 +12,8 @@ const query = z.object({
   /** Optional start window, for plans tied to a time of day. */
   after: clock.optional(),
   before: clock.optional(),
+  /** A break from the working day (a long lunch): working days only, inside usual hours. */
+  work: z.literal("1").optional(),
 });
 
 export async function GET(req: Request) {
@@ -19,9 +21,9 @@ export async function GET(req: Request) {
     const actor = await requireActor();
     const parsed = query.safeParse(Object.fromEntries(new URL(req.url).searchParams));
     if (!parsed.success) throw new DomainError("VALIDATION", "Choose a kind of time and a length.");
-    const { kind, minutes, after, before } = parsed.data;
+    const { kind, minutes, after, before, work } = parsed.data;
     const window = after && before ? ([after, before] as const) : undefined;
-    return Response.json(await freeTimesFor(await getDb(), actor, kind, minutes, new Date(), 14, window), { headers: noStore });
+    return Response.json(await freeTimesFor(await getDb(), actor, kind, minutes, new Date(), 14, window, { duringWork: !!work }), { headers: noStore });
   } catch (err) {
     return errorResponse(err);
   }

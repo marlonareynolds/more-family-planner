@@ -144,7 +144,7 @@ export function DeskBoard({ ai = false, embedded = false, onAdded }: { ai?: bool
   const [drafts, setDrafts] = useState<Draft[] | null>(null);
   /** The letter as pasted, to check each card's quoted line against. */
   const [letter, setLetter] = useState<string | null>(null);
-  const checkCtx = { children: app.children, letter };
+  const checkCtx = { children: app.children, letter, today: todayIn(app.timeZone) };
 
   async function settle(proposals: Proposal[], pasted: string | null) {
     const ds = proposals.map((p) => draftOf(p, app.me.id, app.children.length > 0));
@@ -172,7 +172,7 @@ export function DeskBoard({ ai = false, embedded = false, onAdded }: { ai?: bool
       ds.map((d) => {
         const dup = statuses.find((s) => s.ref === d.key) ?? null;
         const withDup = { ...d, dup: dup?.status === "new" ? null : dup };
-        const checks = checksFor(asProposal(withDup), { children: app.children, letter: pasted });
+        const checks = checksFor(asProposal(withDup), { children: app.children, letter: pasted, today: todayIn(app.timeZone) });
         const flagged = !withDup.past && (checks.some((c) => c.decide) || (!!withDup.dup && withDup.dup.status !== "added"));
         return { ...withDup, flagged, choice: startingChoice(withDup, checks) };
       }),
@@ -505,7 +505,7 @@ function choicesFor(d: Draft): { value: Choice; label: string }[] {
   return [{ value: "add", label: "Add this" }, { value: "skip", label: "Leave out" }];
 }
 
-function DraftCard({ d, ctx, failed, onChange }: { d: Draft; ctx: { children: { id: string }[]; letter: string | null }; failed?: string; onChange: (change: Partial<Draft>) => void }) {
+function DraftCard({ d, ctx, failed, onChange }: { d: Draft; ctx: { children: { id: string }[]; letter: string | null; today?: string }; failed?: string; onChange: (change: Partial<Draft>) => void }) {
   const app = useApp();
   if (d.state === "added" || d.state === "updated" || d.state === "already") {
     const word = d.state === "added" ? "Added" : d.state === "updated" ? "Updated" : "Already in the diary";
@@ -552,6 +552,13 @@ function DraftCard({ d, ctx, failed, onChange }: { d: Draft; ctx: { children: { 
           ))}
         </ul>
       )}
+
+      {/* A doubtful date is said up front, before the person chooses: it is the reason the card waits. */}
+      {!on && decisions.filter((c) => c.code === "date_unclear").map((c) => (
+        <p key={c.code} className="flex items-start gap-2 text-sm text-warn">
+          <AlertTriangle aria-hidden size={16} className="mt-0.5 shrink-0" /> {c.text}
+        </p>
+      ))}
 
       {d.dup?.status === "added" ? null : plainToggle ? (
         <div className="flex flex-wrap items-center justify-between gap-2">

@@ -40,7 +40,9 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
     const minutes = Math.min(720, Math.max(30, Math.ceil(a.durationMinutes / 30) * 30));
     try {
       if (a.durationMinutes <= 720) {
-        const r = await fetch(`/api/v1/free-times?kind=${kind}&minutes=${minutes}`);
+        // The idea's own time of day: no stargazing offered at breakfast.
+        const between = a.startBetween ? `&after=${a.startBetween[0]}&before=${a.startBetween[1]}` : "";
+        const r = await fetch(`/api/v1/free-times?kind=${kind}&minutes=${minutes}${between}${a.duringWork ? "&work=1" : ""}`);
         if (r.ok) {
           const data = (await r.json()) as { slots: SuggestedTime[] };
           setSlot([...data.slots].sort((x, y) => y.score - x.score || x.start - y.start)[0] ?? null);
@@ -154,7 +156,7 @@ export function Ideas({ kind, guidance, lighterWeek = false }: { kind: Activity[
       )}
       <p className="mt-4 text-xs text-ink-3">
         Your places come first. The rest are general starter ideas: nobody has checked them for your area, and they aren&apos;t expert-reviewed yet. A suggestion is never a booking.{" "}
-        <Link className="underline" href="/places">Add a place you like</Link>
+        {app.features.places && <Link className="underline" href="/places">Add a place you like</Link>}
       </p>
       {planning && (
         <MomentEditor

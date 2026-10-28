@@ -9,6 +9,7 @@ import type { WeekView } from "@/server/queries/week";
 import { useApp } from "./app-context";
 import { fmtDateTime } from "./format";
 import { Badge, Button, Card, Checkbox, Dialog, ErrorNote, Field, SectionTitle, inputClass } from "./ui";
+import { InviteShare } from "./invite-share";
 import { useCommand } from "./use-command";
 import { CalendarSettings, type CalendarConnect } from "./calendar-settings";
 import { FamilyScreens, TownSettings, type ScreenLink } from "./family-screens";
@@ -204,15 +205,11 @@ function Adults({ openInvite }: { openInvite: WeekView["openInvite"] }) {
   const app = useApp();
   const { run, pending, error } = useCommand(app.householdId);
   const [link, setLink] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const full = app.adults.length >= 2;
 
   const create = async () => {
     const r = await run<{ token: string }>("CreateInvite", {}, { expected: { membershipRevision: app.membershipRevision } });
-    if (r) {
-      setLink(`${window.location.origin}/join/${r.token}`);
-      setCopied(false);
-    }
+    if (r) setLink(`${window.location.origin}/join/${r.token}`);
   };
 
   return (
@@ -230,22 +227,7 @@ function Adults({ openInvite }: { openInvite: WeekView["openInvite"] }) {
         {full ? (
           <p className="text-sm text-ink-3">More supports two adults per household.</p>
         ) : link ? (
-          <div className="flex flex-col gap-2">
-            <p className="text-sm">Send this link to your partner yourself. It works once and expires in 7 days. More won&apos;t show it again.</p>
-            <div className="flex gap-2">
-              <input readOnly aria-label="Invitation link" className={inputClass} value={link} onFocus={(e) => e.currentTarget.select()} />
-              <Button
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(link);
-                    setCopied(true);
-                  } catch {}
-                }}
-              >
-                {copied ? "Copied" : "Copy"}
-              </Button>
-            </div>
-          </div>
+          <InviteShare link={link} />
         ) : (
           <div className="flex flex-wrap items-center gap-2">
             {openInvite && (

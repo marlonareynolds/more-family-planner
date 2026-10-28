@@ -26,6 +26,7 @@ import { toast } from "./toast";
 import { WeekBoard } from "./week-board";
 import { Button, Card, SectionTitle } from "./ui";
 import { useCommand } from "./use-command";
+import { dismiss, useDismissed } from "./dismissals";
 
 const LONG_DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const LONG_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -66,7 +67,7 @@ function whenLabel(m: { start: number }, today: string, tz: string): string {
   return `${fmtDate(date)} at ${time}`;
 }
 
-export function TodayView({ data, jobs, decisions, deskUsed = true, meals, dinnerOffer }: { data: WeekView; jobs?: JobsView; decisions?: { items: DecisionItem[]; until: string }; deskUsed?: boolean; meals?: MealsView; dinnerOffer?: string }) {
+export function TodayView({ data, jobs, decisions, deskUsed = true, meals, dinnerOffer, later }: { data: WeekView; jobs?: JobsView; decisions?: { items: DecisionItem[]; until: string }; deskUsed?: boolean; meals?: MealsView; dinnerOffer?: string; later?: SetupLater }) {
   const app = useApp();
   const router = useRouter();
   const now = useNow();
@@ -108,10 +109,9 @@ export function TodayView({ data, jobs, decisions, deskUsed = true, meals, dinne
     { done: app.children.length > 0, label: "Add the children", href: "/settings#children", icon: Users },
     { done: deskUsed, label: "Add a letter from school or a club", href: "/desk", icon: Inbox },
     { done: app.adults.length > 1, label: "Bring your partner in", href: "/settings", icon: UserPlus },
-    { done: data.calendars.length > 0 || data.events.some((e) => e.mine), label: "Add your work week or calendar", href: "/welcome", icon: CalendarPlus },
     { done: data.planning.planned || data.moments.some((m) => m.sharing === "shared"), label: "Plan your first week", href: "/plan", icon: Sparkles },
     { done: (jobs?.jobs.length ?? 0) > 0, label: "Share out a household job", href: "/jobs", icon: ListChecks },
-    { done: app.places.length > 0, label: "Save a place you love", href: "/places", icon: MapPin },
+    ...(app.features.places ? [{ done: app.places.length > 0, label: "Save a place you love", href: "/places", icon: MapPin }] : []),
   ];
   const doneSteps = steps.filter((s) => s.done).length;
 
@@ -190,7 +190,7 @@ export function TodayView({ data, jobs, decisions, deskUsed = true, meals, dinne
         </dl>
       </section>
 
-      <QuietNow moments={agreed.filter((m) => m.momentKind === "me" && m.organiserId === app.me.id)} />
+      {app.features["quiet-phone"] && <QuietNow moments={agreed.filter((m) => m.momentKind === "me" && m.organiserId === app.me.id)} />}
 
       {doneSteps < steps.length && (
         <Card className="rise mt-5" style={{ ["--i" as string]: 2 }}>
@@ -221,6 +221,8 @@ export function TodayView({ data, jobs, decisions, deskUsed = true, meals, dinne
           </ul>
         </Card>
       )}
+
+      {later && <SetupLaterCards later={later} />}
 
       {unread.length > 0 && (
         <Card className="rise mt-5" style={{ ["--i" as string]: 3 }}>
@@ -367,5 +369,52 @@ function AwayLines({ data }: { data: WeekView }) {
       })}
       {trip && days > 0 && <li><span className="font-display text-lg italic text-family">{days} {days === 1 ? "sleep" : "sleeps"}</span> until {trip.title}.</li>}
     </ul>
+  );
+}
+
+/** What's still to add that onboarding left for later: each one optional. */
+export interface SetupLater {
+  holidays: boolean;
+  work: boolean;
+  calendar: boolean;
+}
+
+/**
+ * School holidays, a working week and a calendar link, moved out of the
+ * first-run steps (review: time to first value). Each is a small optional
+ * card that opens one step on its own, and "Not now" puts it away on this phone.
+ */
+function SetupLaterCards({ later }: { later: SetupLater }) {
+  const app = useApp();
+  const cards = [
+    later.holidays && app.children.length > 0 && { key: "holidays", title: "Add the school holidays", hint: "More then shows which days need childcare. Or paste the school's term dates into the Household desk." },
+    later.work && { key: "work", title: "Add your working week", hint: "Until you do, More assumes 9 to 5:30 on weekdays and keeps suggestions out of it." },
+    later.calendar && { key: "calendar", title: "Connect your calendar", hint: "Its events show as busy, so nothing is suggested when you're not free. Your partner only sees “Busy”." },
+  ].filter((c): c is { key: string; title: string; hint: string } => !!c);
+  if (!cards.length) return null;
+  return (
+    <section aria-label="Optional setup" className="rise mt-5 flex flex-col gap-2" style={{ ["--i" as string]: 2 }}>
+      {cards.map((c) => <LaterCard key={c.key} step={c.key} title={c.title} hint={c.hint} />)}
+    </section>
+  );
+}
+
+function LaterCard({ step, title, hint }: { step: string; title: string; hint: string }) {
+  const hidden = useDismissed(`more:later:${step}`);
+  if (hidden) return null;
+  return (
+    <Card className="flex flex-col gap-2">
+      <div className="flex items-start gap-3">
+        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-soft text-brand"><CalendarPlus aria-hidden size={15} /></span>
+        <div className="min-w-0 flex-1">
+          <p className="font-medium">{title} <span className="label-caps ml-1 text-ink-3">Optional</span></p>
+          <p className="mt-0.5 text-sm text-ink-2">{hint}</p>
+        </div>
+      </div>
+      <div className="flex gap-2 pl-10">
+        <Link href={`/welcome?add=${step}`} className="inline-flex min-h-10 items-center rounded-full bg-brand-soft px-4 text-sm font-medium text-brand">Add</Link>
+        <Button size="sm" variant="ghost" onClick={() => dismiss(`more:later:${step}`)}>Not now</Button>
+      </div>
+    </Card>
   );
 }

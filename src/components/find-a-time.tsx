@@ -82,7 +82,7 @@ export function FindATime({ kind }: { kind: MomentKind }) {
         {data && data.uncertainFor.length > 0 && (
           <p className="text-xs text-warn">{data.uncertainFor.join(" and ")} {data.uncertainFor.length === 1 && data.uncertainFor[0] !== "You" ? "has" : "have"} a calendar that isn&apos;t up to date, so check before agreeing.</p>
         )}
-        <p className="text-xs text-ink-3">From the diary, connected calendars, agreed plans and childcare. School times count only if they&apos;re in the diary.</p>
+        <p className="text-xs text-ink-3">From the diary, connected calendars, agreed plans and childcare. School hours (8:30 to 3:30 on school days) and working hours (9 to 5:30 on weekdays, unless you&apos;ve added your own working week or calendar) are kept clear.</p>
       </Card>
       {picked && (
         <MomentEditor

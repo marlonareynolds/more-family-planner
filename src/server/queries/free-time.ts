@@ -1,13 +1,14 @@
-import { and, eq, gt, isNull, lt, ne } from "drizzle-orm";
+import { and, eq, gt, ilike, inArray, isNotNull, isNull, lt, ne } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { accounts, calendarFeeds, careArrangements, checkins, children, memberships } from "@/db/schema";
+import { accounts, calendarFeeds, careArrangements, checkins, children, events, holidayPeriods, memberships } from "@/db/schema";
 import type { Busy } from "@/domain/availability";
 import { coverageFor, type CareArrangement } from "@/domain/care";
 import { DomainError } from "@/domain/errors";
 import { freeEvenings, suggestTimes, type ArrangedCare, type MomentKind, type SuggestedTime } from "@/domain/free-time";
 import type { Interval } from "@/domain/intervals";
+import { allAtSchool, usualHours } from "@/domain/usual-hours";
 import { bankHoliday } from "@/lib/bank-holidays";
-import { addDays, currentWeekKey, startOfLocalDate } from "@/domain/time";
+import { addDays, currentWeekKey, instantToLocalDate, startOfLocalDate } from "@/domain/time";
 import type { Actor } from "../auth";
 import { STALE_AFTER_MS } from "../calendar-sync";
 import { loadBusy, loadEventOccurrences } from "./busy";
@@ -22,7 +23,7 @@ export interface FreeTimes {
 }
 
 /** Everything a free-time search needs about the household over a horizon. */
-async function planningContext(db: Db, actor: Actor, kind: MomentKind, now: Date, days: number) {
+async function planningContext(db: Db, actor: Actor, kind: MomentKind, now: Date, days: number, duringWork = false) {
   const household = await householdFor(db, actor);
   if (!household) throw new DomainError("NOT_FOUND", "You are not in a household.");
   const adults = await db
@@ -30,9 +31,11 @@ async function planningContext(db: Db, actor: Actor, kind: MomentKind, now: Date
     .from(memberships)
     .innerJoin(accounts, eq(accounts.id, memberships.accountId))
     .where(and(eq(memberships.householdId, household.id), isNull(memberships.endsAt)));
-  const kids = await db.select({ id: children.id }).from(children).where(and(eq(children.householdId, household.id), isNull(children.archivedAt)));
+  const kids = await db.select({ id: children.id, ageBand: children.ageBand }).from(children).where(and(eq(children.householdId, household.id), isNull(children.archivedAt)));
   const horizon = { start: now.getTime(), end: now.getTime() + (days + 1) * 86_400_000 };
-  const busy = await loadBusy(db, household.id, horizon);
+  const usual = await usualHoursFor(db, household, adults.map((a) => a.id), kids, horizon, days);
+  // A long lunch together is taken out of the working day, so only then is it left open.
+  const busy = [...(await loadBusy(db, household.id, horizon)), ...(duringWork ? [] : usual.work)];
   const participants = kind === "me" ? [actor.accountId] : adults.map((a) => a.id);
   const arrangements = kids.length
     ? (
@@ -67,8 +70,48 @@ async function planningContext(db: Db, actor: Actor, kind: MomentKind, now: Date
     horizon,
     busy,
     participants,
-    arrangedCare: arrangedCareFor(kids.map((k) => k.id), arrangements, busy, participants),
+    school: usual.school,
+    arrangedCare: atSchoolOr(kids, usual.school, arrangedCareFor(kids.map((k) => k.id), arrangements, busy, participants)),
   };
+}
+
+/**
+ * School and working hours, assumed until the household says otherwise
+ * (review: no cinema at 11:00 on a school day). An adult who has added a
+ * working week ("Work" repeating in the diary) or connected a calendar is
+ * taken at their word instead; school holidays and INSET days added in
+ * Trips and care, and bank holidays, free the children's school day.
+ */
+async function usualHoursFor(db: Db, household: { id: string; timeZone: string }, adultIds: string[], kids: { id: string; ageBand: string }[], horizon: { start: number; end: number }, days: number) {
+  const own = adultIds.length
+    ? await db
+        .select({ ownerId: events.ownerId })
+        .from(events)
+        .where(and(eq(events.householdId, household.id), inArray(events.ownerId, adultIds), isNotNull(events.rule), isNull(events.cancelledAt), isNull(events.feedId), ilike(events.title, "work%")))
+    : [];
+  const feeds = adultIds.length ? await db.select({ accountId: calendarFeeds.accountId }).from(calendarFeeds).where(and(eq(calendarFeeds.householdId, household.id), inArray(calendarFeeds.accountId, adultIds))) : [];
+  const told = new Set([...own.map((o) => o.ownerId), ...feeds.map((f) => f.accountId)]);
+  const from = instantToLocalDate(horizon.start, household.timeZone);
+  const breaks = kids.length
+    ? await db
+        .select({ startDate: holidayPeriods.startDate, endDateExclusive: holidayPeriods.endDateExclusive, childIds: holidayPeriods.childIds })
+        .from(holidayPeriods)
+        .where(and(eq(holidayPeriods.householdId, household.id), isNull(holidayPeriods.archivedAt), gt(holidayPeriods.endDateExclusive, from), lt(holidayPeriods.startDate, addDays(from, days + 2))))
+    : [];
+  return usualHours({
+    timeZone: household.timeZone,
+    from,
+    days: days + 2,
+    workers: adultIds.filter((id) => !told.has(id)),
+    children: kids,
+    breaks,
+    dayOff: (date) => !!bankHoliday(date, household.timeZone),
+  });
+}
+
+/** Children at school for the whole time need nobody else: that care is in place. */
+function atSchoolOr(kids: { id: string }[], school: { childId: string; start: number; end: number }[], arranged: (start: number, end: number) => ArrangedCare | null) {
+  return (start: number, end: number): ArrangedCare | null => (allAtSchool(kids, school, { start, end }) ? "covered" : arranged(start, end));
 }
 
 /**
@@ -91,11 +134,14 @@ export function arrangedCareFor(childIds: readonly string[], arrangements: reado
   };
 }
 
-export async function freeTimesFor(db: Db, actor: Actor, kind: MomentKind, minutes: number, now = new Date(), days = 14, startBetween?: readonly [string, string]): Promise<FreeTimes> {
-  const { household, adults, kids, horizon, busy, participants, arrangedCare } = await planningContext(db, actor, kind, now, days);
+export async function freeTimesFor(db: Db, actor: Actor, kind: MomentKind, minutes: number, now = new Date(), days = 14, startBetween?: readonly [string, string], opts: { duringWork?: boolean } = {}): Promise<FreeTimes> {
+  const { household, adults, kids, horizon, busy, participants, arrangedCare, school } = await planningContext(db, actor, kind, now, days, opts.duringWork);
   const childBusy =
     kind === "family"
-      ? (await loadEventOccurrences(db, household.id, horizon)).filter((o) => o.row.childIds.length > 0).map((o) => ({ start: o.start, end: o.end }))
+      ? [
+          ...(await loadEventOccurrences(db, household.id, horizon)).filter((o) => o.row.childIds.length > 0).map((o) => ({ start: o.start, end: o.end })),
+          ...school.map((s) => ({ start: s.start, end: s.end })),
+        ]
       : [];
   const slots = suggestTimes({
     kind,
@@ -110,6 +156,7 @@ export async function freeTimesFor(db: Db, actor: Actor, kind: MomentKind, minut
     childBusy,
     dayOff: (date) => !!bankHoliday(date, household.timeZone),
     startBetween,
+    workdaysOnly: opts.duringWork,
     arrangedCare,
     familyDayEnd: household.eveningEnds,
   });
