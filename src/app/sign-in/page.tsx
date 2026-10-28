@@ -1,4 +1,6 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
+import { LegalFooter } from "@/components/legal-footer";
 import { authMode, currentActor } from "@/server/auth";
 import { SignInForm } from "./sign-in-form";
 
@@ -15,6 +17,10 @@ export default async function SignIn(props: PageProps<"/sign-in">) {
       <p className="text-sm text-ink-3">
         Can&apos;t get in? <a className="underline" href="/support">Ask for help</a>.
       </p>
+      <p className="text-sm text-ink-3">
+        By signing in you agree to the <Link className="underline" href="/terms">terms of use</Link>. The <Link className="underline" href="/privacy">privacy notice</Link> explains what More keeps and why.
+      </p>
+      <LegalFooter />
     </main>
   );
 }

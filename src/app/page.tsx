@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { LegalFooter } from "@/components/legal-footer";
 import { currentActor } from "@/server/auth";
 
 export default async function Landing() {
@@ -20,6 +21,7 @@ export default async function Landing() {
         </Link>
       </div>
       <p className="text-sm text-ink-3">Opening this page does not give anyone access to your household. Each adult signs in separately.</p>
+      <LegalFooter />
     </main>
   );
 }

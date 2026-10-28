@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { AppProvider } from "@/components/app-context";
 import { infoFrom } from "@/components/app-info";
+import { LegalFooter } from "@/components/legal-footer";
 import { SettingsPanel } from "@/components/settings-panel";
 import { accounts } from "@/db/schema";
 import { loadRange } from "@/server/page-data";
@@ -31,6 +32,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
         screens={await screenLinksFor(db, view.household.id)}
         placeName={view.place?.name ?? null}
       />
+      <LegalFooter />
     </AppProvider>
   );
 }
