@@ -13,9 +13,12 @@ import type { Actor } from "./auth";
  * one or a PDF goes to Claude once, to be read into proposed diary items;
  * More keeps none of it. Nothing is added until the person ticks it.
  *
- * Off unless ANTHROPIC_API_KEY is set, and capped: every read reserves its
- * worst-case cost first against DESK_AI_MONTHLY_CAP_PENCE (default £10), and
- * a read that doesn't fit is not sent. The worst case rests on Anthropic's
+ * Off unless ANTHROPIC_API_KEY is set, and capped twice: every read reserves
+ * its worst-case cost first against its household's monthly allowance
+ * (DESK_AI_HOUSEHOLD_MONTHLY_PENCE, default £2) and against the ceiling for
+ * all households together (DESK_AI_MONTHLY_CAP_PENCE, default £10). A read
+ * that doesn't fit both is not sent, so one busy household can use up only
+ * its own allowance, never everyone's. The worst case rests on Anthropic's
  * token count, which is an estimate, plus a margin and list prices at a
  * cautious exchange rate: a close, conservative bound, not an exact one.
  */
@@ -45,9 +48,23 @@ export function deskAiEnabled(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY) && process.env.DESK_AI !== "off";
 }
 
+function pence(name: string, fallback: number): number {
+  const n = Number(process.env[name] ?? String(fallback));
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+}
+
+/** The ceiling for every household together, per calendar month (UTC). */
 export function monthlyCapPence(): number {
-  const n = Number(process.env.DESK_AI_MONTHLY_CAP_PENCE ?? "1000");
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 1000;
+  return pence("DESK_AI_MONTHLY_CAP_PENCE", 1000);
+}
+
+/**
+ * Each household's own monthly allowance. A read reserves about 70-80p while
+ * it runs (the worst case) but settles at its real cost, a few pence, so £2
+ * covers dozens of letters while leaving room for the reservation.
+ */
+export function householdAllowancePence(): number {
+  return pence("DESK_AI_HOUSEHOLD_MONTHLY_PENCE", 200);
 }
 
 /**
@@ -166,15 +183,50 @@ async function assertMember(db: Db, actor: Actor, householdId: string): Promise<
   if (!member) throw new DomainError("NOT_FOUND", "You are not in this household.");
 }
 
-function monthStart(now: Date): Date {
+export function monthStart(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+}
+
+/** What a reservation counts for now: its real cost once settled, its worst case while running. */
+const counted = sql<string>`coalesce(sum(case when ${usageReservations.state} = 'settled' then ${usageReservations.actualCostMinor} when ${usageReservations.state} = 'reserved' then ${usageReservations.maxCostMinor} else 0 end), 0)`;
+const thisMonthsReads = (now: Date) => and(gte(usageReservations.createdAt, monthStart(now)), sql`${usageReservations.requestId} like 'desk-%'`);
+
+export interface HouseholdSpend {
+  householdId: string;
+  reads: number;
+  settledPence: number;
+  runningPence: number;
+  allowancePence: number;
+}
+
+/**
+ * This month's AI reading spend per household, for the operator (pnpm
+ * ops:ai-spend and the health check). Counts and pence only, no content.
+ */
+export async function spendByHousehold(db: Db, now = new Date()): Promise<{ ceilingPence: number; totalPence: number; households: HouseholdSpend[] }> {
+  const rows = await db
+    .select({
+      householdId: usageReservations.householdId,
+      reads: sql<string>`count(*) filter (where ${usageReservations.state} <> 'released')`,
+      settled: sql<string>`coalesce(sum(${usageReservations.actualCostMinor}) filter (where ${usageReservations.state} = 'settled'), 0)`,
+      running: sql<string>`coalesce(sum(${usageReservations.maxCostMinor}) filter (where ${usageReservations.state} = 'reserved'), 0)`,
+    })
+    .from(usageReservations)
+    .where(thisMonthsReads(now))
+    .groupBy(usageReservations.householdId);
+  const allowancePence = householdAllowancePence();
+  const households = rows
+    .map((r) => ({ householdId: r.householdId, reads: Number(r.reads), settledPence: Number(r.settled), runningPence: Number(r.running), allowancePence }))
+    .sort((a, b) => b.settledPence + b.runningPence - (a.settledPence + a.runningPence));
+  return { ceilingPence: monthlyCapPence(), totalPence: households.reduce((s, h) => s + h.settledPence + h.runningPence, 0), households };
 }
 
 /** The longest a read waits for another read's reservation before giving up on the AI. */
 export const RESERVE_WAIT_MS = 10_000;
 
 /**
- * Reserve the worst case against the month's cap, or refuse. Serialised with
+ * Reserve the worst case against the household's allowance and the month's
+ * ceiling, or refuse. Serialised with
  * an advisory lock so two reads can't both squeeze under the cap; the wait
  * for that lock is bounded, so a stuck reservation can't eat the read's time.
  */
@@ -189,13 +241,15 @@ export async function reserve(db: Db, householdId: string, maxPence: number, now
       if ((e?.code ?? e?.cause?.code) === "55P03") throw new DomainError("FEATURE_DISABLED", "The AI reader is busy just now, so this letter was read the simpler way.");
       throw err;
     }
-    const [row] = await tx
-      .select({
-        spent: sql<string>`coalesce(sum(case when ${usageReservations.state} = 'settled' then ${usageReservations.actualCostMinor} when ${usageReservations.state} = 'reserved' then ${usageReservations.maxCostMinor} else 0 end), 0)`,
-      })
+    const [all] = await tx.select({ spent: counted }).from(usageReservations).where(thisMonthsReads(now));
+    const [ours] = await tx
+      .select({ spent: counted })
       .from(usageReservations)
-      .where(and(gte(usageReservations.createdAt, monthStart(now)), sql`${usageReservations.requestId} like 'desk-%'`));
-    if (Number(row?.spent ?? 0) + maxPence > monthlyCapPence()) {
+      .where(and(thisMonthsReads(now), eq(usageReservations.householdId, householdId)));
+    if (Number(ours?.spent ?? 0) + maxPence > householdAllowancePence()) {
+      throw new DomainError("ALLOWANCE_EXHAUSTED", "Your household has used this month's AI reading allowance, so this letter was read the simpler way.");
+    }
+    if (Number(all?.spent ?? 0) + maxPence > monthlyCapPence()) {
       throw new DomainError("ALLOWANCE_EXHAUSTED", "The AI reader has used this month's allowance, so this letter was read the simpler way.");
     }
     await tx.insert(usageReservations).values({ householdId, requestId, maxCostMinor: maxPence, createdAt: now });

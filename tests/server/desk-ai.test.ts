@@ -35,9 +35,12 @@ describe("Household desk AI reader", () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
     delete process.env.DESK_AI;
     delete process.env.DESK_AI_MONTHLY_CAP_PENCE;
+    // The household allowance has its own tests (ops-safe.test.ts); here only the ceiling is under test.
+    process.env.DESK_AI_HOUSEHOLD_MONTHLY_PENCE = "100000";
   });
   afterEach(() => {
     delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.DESK_AI_HOUSEHOLD_MONTHLY_PENCE;
   });
 
   it("is off without a key, and spends nothing", async () => {

@@ -10,6 +10,7 @@ import { queueLeaveReminders } from "./leave-by";
 import { queueWeatherSwaps, refreshForecasts } from "./weather";
 import { recordRun } from "./ops/health";
 import { purgeNeeds } from "./commands/needs";
+import { pruneRateLimits } from "./rate-limit";
 
 /**
  * Everything time-driven, in one place: called by the scheduler every few
@@ -37,6 +38,7 @@ export async function runTick(db: Db, now = new Date()) {
       meTime: await step("meTime", () => notifyMeClashes(db, now)),
       leave: await step("leave", () => queueLeaveReminders(db, now)),
       needs: await step("needs", () => purgeNeeds(db, now)),
+      rateLimits: await step("rateLimits", () => pruneRateLimits(db, now)),
       outbox: await step("outbox", () => processOutbox(db, now)),
       push: await step("push", () => deliverPushes(db, now)),
       email: await step("email", () => sendWeeklyDigests(db, now)),

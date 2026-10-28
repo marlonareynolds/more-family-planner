@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getDb } from "@/db/client";
 import { currentActor } from "@/server/auth";
+import { LegalFooter } from "@/components/legal-footer";
 import { previewInvite, type InviteState } from "@/server/queries/invite";
 import { JoinButton } from "./join-button";
 
@@ -53,6 +54,7 @@ export default async function Join(props: PageProps<"/join/[token]">) {
           )}
         </>
       )}
+      <LegalFooter />
     </main>
   );
 }

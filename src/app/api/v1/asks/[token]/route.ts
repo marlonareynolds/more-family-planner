@@ -3,7 +3,7 @@ import { getDb } from "@/db/client";
 import { DomainError } from "@/domain/errors";
 import { answerAsk } from "@/server/commands/village";
 import { assertRate, clientAddress } from "@/server/rate-limit";
-import { assertSameOrigin, errorResponse, noStore } from "@/server/http";
+import { assertSameOrigin, errorResponse, noStore, readJson } from "@/server/http";
 import { afterChange } from "@/server/tick";
 import { after } from "next/server";
 
@@ -13,9 +13,9 @@ const body = z.object({ response: z.enum(["yes", "no"]) });
 export async function POST(req: Request, ctx: RouteContext<"/api/v1/asks/[token]">) {
   try {
     assertSameOrigin(req);
-    assertRate(`ask:${clientAddress(req)}`, 20, 60_000);
+    await assertRate(`ask:${clientAddress(req)}`, 20, 60_000);
     const { token } = await ctx.params;
-    const parsed = body.safeParse(await req.json());
+    const parsed = body.safeParse(await readJson(req));
     if (!parsed.success || token.length < 10 || token.length > 100) throw new DomainError("VALIDATION", "That answer wasn't understood.");
     const db = await getDb();
     const view = await answerAsk(db, token, parsed.data.response);
